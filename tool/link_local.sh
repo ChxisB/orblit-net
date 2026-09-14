@@ -13,7 +13,7 @@ CORE="$ENGINE/packages/orblit_core"
 
 if [ ! -f "$CORE/pubspec.yaml" ]; then
   echo "No engine checkout at $ENGINE."
-  echo "Clone Orblit-Engine/orblit beside this one, or pass its path."
+  echo "Clone ChxisB/orblit beside this one, or pass its path."
   exit 1
 fi
 

@@ -21,7 +21,7 @@ jobs:
         with:
           # No token: these repositories are public, so the default
           # GITHUB_TOKEN reads them. Nothing here needs a secret.
-          repository: Orblit-Engine/orblit
+          repository: ChxisB/orblit
           path: orblit
 
       - uses: dart-lang/setup-dart@v1

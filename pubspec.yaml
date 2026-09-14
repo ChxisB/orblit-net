@@ -11,7 +11,7 @@ environment:
 dependencies:
   orblit_core:
     git:
-      url: https://github.com/Orblit-Engine/orblit.git
+      url: https://github.com/ChxisB/orblit.git
       path: packages/orblit_core
       ref: main
 
