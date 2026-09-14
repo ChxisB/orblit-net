@@ -13,7 +13,7 @@ dependencies:
     git:
       url: https://github.com/Orblit-Engine/orblit.git
       path: packages/orblit_core
-      ref: master
+      ref: main
 
 dev_dependencies:
   lints: ^5.0.0
