@@ -10,7 +10,7 @@ import 'transport.dart';
 /// snapshot is a message with a length, and WebSocket already delivers whole
 /// messages in order. Building sequencing, acknowledgement and reassembly on
 /// top of datagrams is a real piece of work, and it is not the piece that
-/// makes Orbis worth using. When the frame budget says otherwise, this
+/// makes Orblit worth using. When the frame budget says otherwise, this
 /// interface is where a datagram transport goes.
 class SocketTransport implements Transport {
   SocketTransport(this._socket) {
@@ -97,7 +97,7 @@ class SocketServer {
           // than ignored, so a browser pointed here sees why nothing happens.
           request.response
             ..statusCode = HttpStatus.badRequest
-            ..write('This port speaks the Orbis session protocol.');
+            ..write('This port speaks the Orblit session protocol.');
           await request.response.close();
           return;
         }

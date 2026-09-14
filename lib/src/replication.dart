@@ -1,4 +1,4 @@
-import 'package:orbis_core/orbis_core.dart';
+import 'package:orblit_core/orblit_core.dart';
 
 /// A component that crosses the wire, and the rules for who may write it.
 class ReplicatedComponent {

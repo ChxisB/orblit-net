@@ -1,4 +1,4 @@
-/// Multiplayer for Orbis.
+/// Multiplayer for Orblit.
 ///
 /// Replication reads component columns rather than walking entities, so
 /// capturing a world costs a handful of contiguous copies instead of a lookup

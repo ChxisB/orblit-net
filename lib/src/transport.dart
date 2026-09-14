@@ -5,7 +5,7 @@ import 'dart:typed_data';
 ///
 /// Everything above this interface is about turning a world into bytes and
 /// back; everything below it is about getting bytes to another machine. The
-/// seam is deliberately narrow, so a game that needs a transport Orbis does
+/// seam is deliberately narrow, so a game that needs a transport Orblit does
 /// not ship can supply one in an afternoon.
 abstract interface class Transport {
   /// Messages from the peer, already framed.

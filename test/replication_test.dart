@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:orbis_core/orbis_core.dart';
-import 'package:orbis_net/orbis_net.dart';
+import 'package:orblit_core/orblit_core.dart';
+import 'package:orblit_net/orblit_net.dart';
 import 'package:test/test.dart';
 
 /// Lets the loopback link deliver everything queued.

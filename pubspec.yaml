@@ -1,6 +1,6 @@
-name: orbis_net
+name: orblit_net
 description: >-
-  Multiplayer for Orbis. Replicates component columns rather than object
+  Multiplayer for Orblit. Replicates component columns rather than object
   properties, with ownership rules, interpolation and its own transports.
 version: 0.1.0
 publish_to: none
@@ -9,10 +9,10 @@ environment:
   sdk: ^3.10.0
 
 dependencies:
-  orbis_core:
+  orblit_core:
     git:
-      url: https://github.com/Orbis-Engine/orbis.git
-      path: packages/orbis_core
+      url: https://github.com/Orblit-Engine/orblit.git
+      path: packages/orblit_core
       ref: master
 
 dev_dependencies:

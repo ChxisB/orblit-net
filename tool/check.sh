@@ -5,18 +5,18 @@ cd "$(dirname "$0")/.."
 
 failures=0
 
-if dart analyze > /tmp/orbis_net_analyze.log 2>&1; then
+if dart analyze > /tmp/orblit_net_analyze.log 2>&1; then
   echo "  ok    analyze"
 else
-  echo "  FAIL  analyze"; tail -20 /tmp/orbis_net_analyze.log; failures=$((failures+1))
+  echo "  FAIL  analyze"; tail -20 /tmp/orblit_net_analyze.log; failures=$((failures+1))
 fi
 
-if dart test > /tmp/orbis_net_test.log 2>&1; then
-  summary=$(tr '\r' '\n' < /tmp/orbis_net_test.log | tail -1 \
+if dart test > /tmp/orblit_net_test.log 2>&1; then
+  summary=$(tr '\r' '\n' < /tmp/orblit_net_test.log | tail -1 \
     | sed -e 's/\x1b\[[0-9;]*m//g' -e 's/^[0-9:]* //')
   echo "  ok    $summary"
 else
-  echo "  FAIL  tests"; tail -25 /tmp/orbis_net_test.log; failures=$((failures+1))
+  echo "  FAIL  tests"; tail -25 /tmp/orblit_net_test.log; failures=$((failures+1))
 fi
 
 if dart format --output=none --set-exit-if-changed lib test > /dev/null 2>&1; then

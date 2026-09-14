@@ -39,7 +39,7 @@ class DecodedSnapshot {
 /// Component bytes cross the wire exactly as the engine stores them, so a
 /// transform costs twelve bytes and no conversion. That assumes both ends
 /// agree on layout, which they do when they run the same build — and it
-/// assumes little-endian peers, which every platform Orbis targets is. A
+/// assumes little-endian peers, which every platform Orblit targets is. A
 /// mixed-endian pairing would need byte swapping per component and is not
 /// supported rather than silently wrong.
 class SnapshotCodec {

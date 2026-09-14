@@ -8,21 +8,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ENGINE=${1:-../orbis}
-CORE="$ENGINE/packages/orbis_core"
+ENGINE=${1:-../orblit}
+CORE="$ENGINE/packages/orblit_core"
 
 if [ ! -f "$CORE/pubspec.yaml" ]; then
   echo "No engine checkout at $ENGINE."
-  echo "Clone Orbis-Engine/orbis beside this one, or pass its path."
+  echo "Clone Orblit-Engine/orblit beside this one, or pass its path."
   exit 1
 fi
 
 cat > pubspec_overrides.yaml <<YAML
 # Written by tool/link_local.sh. Not committed.
 dependency_overrides:
-  orbis_core:
+  orblit_core:
     path: $(cd "$CORE" && pwd)
 YAML
 
 dart pub get > /dev/null
-echo "orbis_net -> $(cd "$CORE" && pwd)"
+echo "orblit_net -> $(cd "$CORE" && pwd)"

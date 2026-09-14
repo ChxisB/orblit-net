@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: orbis-net
+          path: orblit-net
 
       # The engine is a separate private repository, so CI checks it out and
       # points this package at it rather than resolving a git dependency it
@@ -21,8 +21,8 @@ jobs:
         with:
           # No token: these repositories are public, so the default
           # GITHUB_TOKEN reads them. Nothing here needs a secret.
-          repository: Orbis-Engine/orbis
-          path: orbis
+          repository: Orblit-Engine/orblit
+          path: orblit
 
       - uses: dart-lang/setup-dart@v1
         with:
@@ -31,9 +31,9 @@ jobs:
           sdk: 3.13.0
 
       - name: Link the engine
-        working-directory: orbis-net
-        run: ./tool/link_local.sh ../orbis
+        working-directory: orblit-net
+        run: ./tool/link_local.sh ../orblit
 
       - name: Check
-        working-directory: orbis-net
+        working-directory: orblit-net
         run: ./tool/check.sh

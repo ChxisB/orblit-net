@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:orbis_core/orbis_core.dart';
+import 'package:orblit_core/orblit_core.dart';
 
 import 'ack.dart';
 import 'codec.dart';
