@@ -28,5 +28,8 @@ git clone https://github.com/ChxisB/orblit.git       # beside this one
 
 ## Licence
 
-MIT, © 2026 Chris Beckett. Nothing third-party ships inside this one — see
-[LICENSE](LICENSE).
+FSL-1.1-MIT, © 2026 Chris Beckett — use it, fork it and ship games with it,
+commercial ones included, but don't offer it as a competing product. Each
+release becomes MIT two years after it's published.
+
+Nothing third-party ships inside this one — see [LICENSE](LICENSE).
