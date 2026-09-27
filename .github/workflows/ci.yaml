@@ -37,3 +37,24 @@ jobs:
       - name: Check
         working-directory: orblit-net
         run: ./tool/check.sh
+
+  # Checks each commit on a pull request against commitlint.config.mjs.
+  # Pull requests only, since a push to main has no range to check. It
+  # checks out the branch head, not the merge commit GitHub makes, so the
+  # range holds the branch's own commits and nothing else.
+  commits:
+    name: Commits
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx --yes @commitlint/cli@21 --from "origin/$BASE_BRANCH" --to HEAD
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}

@@ -5,3 +5,10 @@ analyzer:
     strict-casts: true
     strict-inference: true
     strict-raw-types: true
+
+linter:
+  rules:
+    avoid_dynamic_calls: true
+    unawaited_futures: true
+    prefer_final_locals: true
+    prefer_const_constructors: true

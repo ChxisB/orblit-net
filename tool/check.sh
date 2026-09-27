@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 failures=0
 
-if dart analyze > /tmp/orblit_net_analyze.log 2>&1; then
+if dart analyze --fatal-infos > /tmp/orblit_net_analyze.log 2>&1; then
   echo "  ok    analyze"
 else
   echo "  FAIL  analyze"; tail -20 /tmp/orblit_net_analyze.log; failures=$((failures+1))
