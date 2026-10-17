@@ -102,7 +102,7 @@ void main() {
   NetHost build({
     bool takeOver = false,
     int joinTicks = 300,
-    Admission Function(Uint8List) admit = admitByName,
+    FutureOr<Admission> Function(Uint8List) admit = admitByName,
   }) {
     return NetHost(
       world: authority.world,
@@ -217,6 +217,107 @@ void main() {
 
       expect(stranger.reasons, [GoodbyeReason.refused]);
       expect(host.clientCount, 0);
+    });
+
+    group('an admission that answers later', () {
+      late Completer<Admission> answer;
+      late int asked;
+
+      Connection waiting({int joinTicks = 300}) {
+        answer = Completer<Admission>();
+        asked = 0;
+        host = build(
+          joinTicks: joinTicks,
+          admit: (_) {
+            asked++;
+            return answer.future;
+          },
+        );
+        return connect(as: 'ann');
+      }
+
+      setUp(() async => host.dispose());
+
+      test('seats the connection when the future admits', () async {
+        waiting();
+        await settle();
+        expect(host.clientCount, 0);
+
+        answer.complete(const Admit('ann'));
+        await settle();
+
+        expect(host.sessionState('ann'), SessionState.live);
+        expect(joined, ['ann']);
+      });
+
+      test('turns the connection away when the future refuses', () async {
+        final stranger = waiting();
+        await settle();
+        answer.complete(const Refuse('no'));
+        await settle();
+
+        expect(stranger.reasons, ['no']);
+        expect(host.clientCount, 0);
+        expect(joined, isEmpty);
+      });
+
+      test('refuses when the future fails', () async {
+        final stranger = waiting();
+        await settle();
+        answer.completeError(StateError('database down'));
+        await settle();
+
+        expect(stranger.reasons, [GoodbyeReason.refused]);
+        expect(host.clientCount, 0);
+      });
+
+      test('keeps publishing while it waits', () async {
+        waiting();
+        await publish(3);
+        expect(host.tick, 3);
+      });
+
+      test('asks once however many joins arrive meanwhile', () async {
+        final ann = waiting();
+        ann.client.join(credentials('ann'));
+        ann.client.join(credentials('ann'));
+        await settle();
+
+        expect(asked, 1);
+      });
+
+      test('drops the verdict of a connection that hung up', () async {
+        final ann = waiting();
+        await settle();
+        await drop(ann);
+        answer.complete(const Admit('ann'));
+        await settle();
+
+        expect(host.sessionState('ann'), isNull);
+        expect(joined, isEmpty);
+      });
+
+      test('drops the verdict that arrives after joinTicks', () async {
+        final ann = waiting(joinTicks: 2);
+        await publish(2);
+        answer.complete(const Admit('ann'));
+        await settle();
+
+        expect(ann.reasons, [GoodbyeReason.joinTimeout]);
+        expect(host.sessionState('ann'), isNull);
+        expect(joined, isEmpty);
+      });
+
+      test('drops the verdict that arrives after dispose', () async {
+        waiting();
+        await settle();
+        await host.dispose();
+        answer.complete(const Admit('ann'));
+        await settle();
+
+        expect(host.clientCount, 0);
+        expect(joined, isEmpty);
+      });
     });
 
     test('a connection that never joins is closed after joinTicks', () async {

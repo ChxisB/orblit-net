@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- Let `SessionPolicy.admit` answer with a future. The host keeps ticking
+  while it waits. A failed future refuses the join. An answer for a
+  connection that closed or timed out meanwhile is dropped, and a second
+  join from a connection that is still waiting is ignored. A plain answer
+  works as before.
+
 ## 0.8.0
 
 - Add game messages. `NetClient.sendMessage` and `NetHost.sendMessage` carry

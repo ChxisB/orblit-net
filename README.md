@@ -89,8 +89,11 @@ client.join(credentials);
 ```
 
 - `admit` gets the bytes the client sent and answers `Admit(key)` or
-  `Refuse(reason)`. A throw refuses the join. Orblit checks nothing about who
-  someone is. It answers at once, so check a ticket the game already holds.
+  `Refuse(reason)`, or a future of either. A throw or a failed future refuses
+  the join. Orblit checks nothing about who someone is. A future suits a
+  password hash or a database lookup. The host keeps ticking while it waits,
+  `joinTicks` still counts down, and a second join from the same connection
+  is ignored. An answer for a connection that has since closed is dropped.
   `SocketServer` speaks plain `ws://`. Put a TLS proxy in front of it when
   the bytes must stay private.
 - A refused client gets the reason in `onGoodbye` and the connection closes.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 /// What the game decides about a join.
@@ -66,8 +67,10 @@ abstract final class GoodbyeReason {
 /// How a host treats the clients it admits.
 ///
 /// Orblit checks nothing about who someone is. [admit] is given the bytes the
-/// client sent and answers for the game. It runs inside the host, so it
-/// answers at once: check a ticket the game already holds, not a database.
+/// client sent and answers for the game. A plain answer is acted on at once.
+/// A future may take longer, for a password hash or a database, and the host
+/// keeps ticking while it waits. The connection stays unjoined, so
+/// [joinTicks] still counts down, and a second join from it is ignored.
 final class SessionPolicy {
   SessionPolicy({
     required this.admit,
@@ -89,9 +92,9 @@ final class SessionPolicy {
     }
   }
 
-  /// Turns what a client sent at join into a key or a refusal. A throw
-  /// refuses the join, since the bytes come from a client.
-  final Admission Function(Uint8List credentials) admit;
+  /// Turns what a client sent at join into a key or a refusal. A throw, or a
+  /// future that fails, refuses the join, since the bytes come from a client.
+  final FutureOr<Admission> Function(Uint8List credentials) admit;
 
   /// Host ticks a dropped session keeps its entities.
   final int lingerTicks;

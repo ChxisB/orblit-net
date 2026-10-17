@@ -75,6 +75,10 @@ final class _Connection {
 
   /// Set when the connection is admitted.
   _Client? client;
+
+  /// True while an `admit` that returned a future has not answered. A second
+  /// join in that time is ignored.
+  bool deciding = false;
 }
 
 /// Why an input, or a whole message, was not applied. Counted rather than thrown: a hostile client
@@ -324,23 +328,46 @@ class NetHost {
     }
     connection.meter.count(message.length);
     final credentials = decodeJoin(message);
-    if (credentials == null) return;
+    if (credentials == null || connection.deciding) return;
 
-    switch (_verdict(policy, credentials)) {
+    final verdict = _verdict(policy, credentials);
+    if (verdict is Future<Admission>) {
+      connection.deciding = true;
+      unawaited(verdict.then((v) => _settle(policy, connection, v)));
+    } else {
+      _settle(policy, connection, verdict);
+    }
+  }
+
+  FutureOr<Admission> _verdict(SessionPolicy policy, Uint8List credentials) {
+    // The bytes come from a client. Whatever the game's parser throws on
+    // them is a refusal, not a crash.
+    const refused = Refuse(GoodbyeReason.refused);
+    try {
+      final verdict = policy.admit(credentials);
+      if (verdict is Future<Admission>) {
+        return verdict.onError<Object>((_, _) => refused);
+      }
+      return verdict;
+    } catch (_) {
+      return refused;
+    }
+  }
+
+  /// Acts on a verdict. A connection that closed, timed out or was cut off
+  /// while the game decided is no longer waiting, so the verdict is dropped.
+  void _settle(
+    SessionPolicy policy,
+    _Connection connection,
+    Admission verdict,
+  ) {
+    connection.deciding = false;
+    if (!_unjoined.contains(connection)) return;
+    switch (verdict) {
       case Refuse(:final reason):
         _refuse(connection, reason);
       case Admit(:final key):
         _seat(policy, key, connection);
-    }
-  }
-
-  Admission _verdict(SessionPolicy policy, Uint8List credentials) {
-    try {
-      return policy.admit(credentials);
-    } catch (_) {
-      // The bytes come from a client. Whatever the game's parser throws on
-      // them is a refusal, not a crash.
-      return const Refuse(GoodbyeReason.refused);
     }
   }
 
