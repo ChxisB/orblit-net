@@ -7,6 +7,7 @@ import 'ack.dart';
 import 'codec.dart';
 import 'input.dart';
 import 'replication.dart';
+import 'session_message.dart';
 import 'transport.dart';
 
 /// One entity's replicated state, as a complete row.
@@ -47,6 +48,7 @@ class NetClient {
     this.historyDepth = 32,
     this.onSpawn,
     this.onDespawn,
+    this.onGoodbye,
     double Function()? clock,
   }) : _world = world,
        _networkId = networkId,
@@ -84,6 +86,9 @@ class NetClient {
   final void Function(int networkId, int entity)? onSpawn;
   final void Function(int networkId, int entity)? onDespawn;
 
+  /// Called with the reason when the authority sends this client away.
+  final void Function(String reason)? onGoodbye;
+
   late final StreamSubscription<Uint8List> _subscription;
   final double Function() _now;
   final Map<int, int> _entities = {};
@@ -104,6 +109,10 @@ class NetClient {
   int? entityFor(int networkId) => _entities[networkId];
 
   Iterable<int> get networkIds => _entities.keys;
+
+  /// Tells a host that admits clients who this is. [credentials] are the
+  /// game's own bytes, handed to its admission function unread.
+  void join(Uint8List credentials) => _transport.send(encodeJoin(credentials));
 
   /// Proposes writes to entities this client owns.
   ///
@@ -146,6 +155,12 @@ class NetClient {
   }
 
   void _receive(Uint8List message) {
+    final goodbye = decodeGoodbye(message);
+    if (goodbye != null) {
+      onGoodbye?.call(goodbye);
+      return;
+    }
+
     final snapshot = _codec.decode(message);
 
     // A delta against a tick this client never applied would leave the world
