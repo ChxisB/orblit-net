@@ -33,6 +33,26 @@ class _Client {
   /// that drifts.
   int acknowledgedTick = 0;
 
+  /// What this client was sent, by tick: the whole world, or the part of it
+  /// the interest rule let through. A delta is built against the entry for
+  /// [acknowledgedTick], so what the client lacks is whatever differs from
+  /// what it was shown, not from what the world held.
+  final Map<int, WorldSnapshot> shown = {};
+
+  void acknowledge(int tick) {
+    if (tick <= acknowledgedTick) return;
+    acknowledgedTick = tick;
+    shown.removeWhere((shownTick, _) => shownTick < tick);
+  }
+
+  /// Remembers [snapshot], and forgets the oldest past [depth].
+  void show(WorldSnapshot snapshot, int depth) {
+    shown[snapshot.tick] = snapshot;
+    while (shown.length > depth) {
+      shown.remove(shown.keys.first);
+    }
+  }
+
   /// What this client has sent since the last tick.
   final BudgetMeter meter = BudgetMeter();
 }
@@ -78,6 +98,19 @@ enum InputRejection {
   overBudget,
 }
 
+/// What a client is told about. [NetHost] asks it, so it is declared here.
+abstract interface class InterestRule {
+  /// Reads the capture every client's update is built from. Called once a
+  /// tick, before any [isRelevant]. [focus] holds the network ids each
+  /// connected client owns, by client id.
+  void observe(WorldSnapshot world, Map<String, List<int>> focus);
+
+  /// Whether [networkId] belongs in [clientId]'s update. Called once per
+  /// entity per client per tick, and never for an entity the client owns,
+  /// which the client always sees.
+  bool isRelevant(String clientId, int networkId);
+}
+
 /// The authority: it owns the world and tells clients what happened.
 class NetHost {
   NetHost({
@@ -90,6 +123,7 @@ class NetHost {
     void Function(PhaseSummary summary)? onOverrun,
     this.sessions,
     InboundBudget? budget,
+    this.interest,
   }) : budget = budget ?? InboundBudget(),
        _world = world,
        _networkId = networkId,
@@ -119,8 +153,8 @@ class NetHost {
   final SnapshotCodec _codec = const SnapshotCodec();
   final PhaseTimes _times;
 
-  /// How many past snapshots to keep for building deltas. A client further
-  /// behind than this is sent a full snapshot instead.
+  /// How many past snapshots to keep for each client, for building deltas. A
+  /// client further behind than this is sent a full snapshot instead.
   final int historyDepth;
 
   /// How clients are admitted, kept across a drop and ended. Null for a host
@@ -130,6 +164,10 @@ class NetHost {
   /// What each client may send between two ticks. One that stays over it is
   /// cut off.
   final InboundBudget budget;
+
+  /// Which entities each client is told about. Null tells every client about
+  /// every entity.
+  final InterestRule? interest;
 
   late final int _ownerWritableMask;
 
@@ -142,8 +180,6 @@ class NetHost {
   final Map<String, int> _lingeringSince = {};
 
   final Set<_Connection> _unjoined = {};
-  final Map<int, WorldSnapshot> _history = {};
-  final List<int> _historyOrder = [];
   final Map<int, int> _entityByNetworkId = {};
   final Map<int, String> _ownerByNetworkId = {};
 
@@ -404,9 +440,7 @@ class NetHost {
 
     final acknowledged = decodeAck(message);
     if (acknowledged != null) {
-      if (acknowledged > client.acknowledgedTick) {
-        client.acknowledgedTick = acknowledged;
-      }
+      client.acknowledge(acknowledged);
       return;
     }
 
@@ -468,28 +502,56 @@ class NetHost {
         _expire();
       });
       final current = _times.phase('capture', () => _capture.capture(_tick));
+      final rule = interest;
+      if (rule != null) {
+        _times.phase('interest', () => rule.observe(current, _ownedByClient()));
+      }
 
       // Per-client stages add up across clients within a tick.
       for (final client in _clients.values) {
-        final baseline = _history[client.acknowledgedTick];
-        final message = _times.phase(
-          'encode',
-          () => baseline == null
-              ? _codec.encodeFull(current)
-              : _codec.encodeDelta(current, baseline),
-        );
-        _times.phase('send', () => client.transport.send(message));
-        _times.phase('count', () => _countSent(client.id, message));
+        _sendTo(client, current, rule);
       }
 
-      _times.phase('history', () {
-        _remember(current);
-        _forgetDeadEntities(current);
-      });
+      _times.phase('forget', () => _forgetDeadEntities(current));
     } finally {
       // A tick that throws still closes, so the next one is not merged into it.
       _times.finish();
     }
+  }
+
+  void _sendTo(_Client client, WorldSnapshot current, InterestRule? rule) {
+    final seen = rule == null
+        ? current
+        : _times.phase(
+            'interest',
+            () => current.filtered((id) => _canSee(rule, client, id)),
+          );
+    final baseline = client.shown[client.acknowledgedTick];
+    final message = _times.phase(
+      'encode',
+      () => baseline == null
+          ? _codec.encodeFull(seen)
+          : _codec.encodeDelta(seen, baseline),
+    );
+    _times.phase('send', () => client.transport.send(message));
+    _times.phase('count', () => _countSent(client.id, message));
+    client.show(seen, historyDepth);
+  }
+
+  bool _canSee(InterestRule rule, _Client client, int networkId) =>
+      _ownerByNetworkId[networkId] == client.id ||
+      rule.isRelevant(client.id, networkId);
+
+  /// The network ids each connected client owns, by client id. A lingering
+  /// session has no connection to send to, so it has no focus.
+  Map<String, List<int>> _ownedByClient() {
+    final owned = <String, List<int>>{};
+    for (final entry in _ownerByNetworkId.entries) {
+      if (_clients.containsKey(entry.value)) {
+        (owned[entry.value] ??= []).add(entry.key);
+      }
+    }
+    return owned;
   }
 
   /// Splits what one message cost by component column. Whatever is not a
@@ -540,14 +602,6 @@ class NetHost {
         _entityByNetworkId.remove(networkId);
         _ownerByNetworkId.remove(networkId);
       }
-    }
-  }
-
-  void _remember(WorldSnapshot snapshot) {
-    _history[snapshot.tick] = snapshot;
-    _historyOrder.add(snapshot.tick);
-    while (_historyOrder.length > historyDepth) {
-      _history.remove(_historyOrder.removeAt(0));
     }
   }
 

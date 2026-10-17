@@ -34,6 +34,23 @@ class SnapshotGroup {
 
   Uint8List rowAt(int index) =>
       Uint8List.sublistView(rows, index * stride, (index + 1) * stride);
+
+  /// A group of the entities at [indices], in that order, with their rows
+  /// copied.
+  SnapshotGroup pick(List<int> indices) {
+    final picked = Uint8List(indices.length * stride);
+    for (var i = 0; i < indices.length; i++) {
+      picked.setRange(i * stride, (i + 1) * stride, rows, indices[i] * stride);
+    }
+    return SnapshotGroup(
+      mask: mask,
+      stride: stride,
+      networkIds: Uint64List.fromList([
+        for (final index in indices) networkIds[index],
+      ]),
+      rows: picked,
+    );
+  }
 }
 
 /// Where one entity's state sits inside a snapshot.
@@ -65,6 +82,24 @@ class WorldSnapshot {
   SnapshotRow? rowFor(int networkId) => _byNetworkId[networkId];
 
   int get entityCount => _byNetworkId.length;
+
+  /// The entities whose network ids pass [keep], asked once each. A group
+  /// that passes whole is shared rather than copied.
+  WorldSnapshot filtered(bool Function(int networkId) keep) {
+    final kept = <SnapshotGroup>[];
+    for (final group in groups) {
+      final indices = [
+        for (var i = 0; i < group.length; i++)
+          if (keep(group.networkIds[i])) i,
+      ];
+      if (indices.length == group.length) {
+        kept.add(group);
+      } else if (indices.isNotEmpty) {
+        kept.add(group.pick(indices));
+      }
+    }
+    return WorldSnapshot(tick, kept);
+  }
 
   static WorldSnapshot empty(int tick) => WorldSnapshot(tick, const []);
 }

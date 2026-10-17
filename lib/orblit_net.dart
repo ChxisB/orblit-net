@@ -16,7 +16,8 @@ export 'src/budget.dart' show InboundBudget;
 export 'src/client.dart' show NetClient;
 export 'src/codec.dart'
     show DecodedSnapshot, SnapshotCodec, SnapshotFormatError;
-export 'src/host.dart' show InputRejection, NetHost;
+export 'src/host.dart' show InputRejection, InterestRule, NetHost;
+export 'src/interest.dart' show Cell, Grid, GridInterest;
 export 'src/input.dart' show InputEntry, InputMessage, decodeInput, encodeInput;
 export 'src/phase_times.dart' show ClientBytes, PhaseStats, PhaseSummary;
 export 'src/replication.dart' show ReplicatedComponent, ReplicationSet;
