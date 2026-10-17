@@ -52,11 +52,17 @@ This runs a host with 200 scripted clients, each moving one entity, and
 prints the tick, the drift, the time in each phase and the bytes each client
 was sent per second. Scripts are `still`, `walk` and `random`. `--sockets`
 uses WebSockets on localhost. `--slow-ms 20` adds a system that takes 20 ms,
-to see a slow phase show up. The command exits 1 when the average tick is
-longer than the period.
+to see a slow phase show up. `--help` lists the rest.
 
-The clients share the host's thread, so their decoding adds to drift. The
-phase table is the host's own cost. Only the last 300 ticks are measured.
+The command exits 1 when the host's average tick is longer than the period,
+and 2 when the host refused any input, since those figures are not a load.
+Only the last 300 ticks are judged.
+
+The clients share the host's thread. Input handling and the clients' own work
+run between ticks, outside every phase, so they show up as drift. The phase
+table is only the host's publish. When drift is large the report says the run
+fell behind, and the clients are the likely cause. The byte rates include each
+client's first full snapshot.
 
 ## Licence
 

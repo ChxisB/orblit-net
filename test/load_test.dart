@@ -33,10 +33,11 @@ void main() {
     },
   );
 
-  test('inputs from every client are applied and none refused', () async {
+  test('every input a client sends before the last tick is applied', () async {
     final report = await runLoad(options());
 
-    expect(report.accepted, greaterThan(0));
+    // Inputs sent on the last tick are delivered after the report is built.
+    expect(report.accepted, 8 * 9);
     expect(report.rejected, 0);
   });
 
@@ -87,14 +88,92 @@ void main() {
     expect(easy.overran, isFalse);
   });
 
-  test('describe names the worst phase and the bytes per client', () async {
+  test(
+    'describe lists the worst phase first and the bytes per client',
+    () async {
+      final report = await runLoad(
+        options(system: (_) => sleep(const Duration(milliseconds: 3))),
+      );
+
+      final lines = report.describe().split('\n');
+      final first = lines[lines.indexOf('phase (per tick)') + 1];
+      expect(first.trim(), startsWith('system'));
+      expect(lines, contains(startsWith('  Position')));
+      expect(lines.first, startsWith('8 clients'));
+    },
+  );
+
+  test(
+    'a run that finishes in time exits 0, an overrun 1, a refusal 2',
+    () async {
+      final easy = await runLoad(
+        options(period: const Duration(milliseconds: 100), ticks: 3),
+      );
+      final refused = LoadReport(
+        clients: easy.clients,
+        ticks: easy.ticks,
+        period: easy.period,
+        elapsed: easy.elapsed,
+        summary: easy.summary,
+        accepted: easy.accepted,
+        rejected: 1,
+      );
+      final overran = await runLoad(
+        options(
+          period: const Duration(milliseconds: 2),
+          ticks: 4,
+          system: (_) => sleep(const Duration(milliseconds: 6)),
+        ),
+      );
+
+      expect(easy.exitCode, 0);
+      expect(overran.exitCode, 1);
+      expect(refused.exitCode, 2);
+    },
+  );
+
+  test('a run that starts ticks late says so', () async {
     final report = await runLoad(
-      options(system: (_) => sleep(const Duration(milliseconds: 3))),
+      options(
+        period: const Duration(milliseconds: 2),
+        system: (_) => sleep(const Duration(milliseconds: 8)),
+      ),
     );
 
-    final text = report.describe();
-    expect(text, contains('system'));
-    expect(text, contains('Position'));
-    expect(text, contains('8 clients'));
+    expect(report.behind, isTrue);
+    expect(report.describe(), contains('behind schedule'));
   });
+
+  test('options that cannot run are refused', () {
+    final walk = loadScripts['walk']!;
+    expect(
+      () => LoadOptions(clients: 0, ticks: 1, script: walk),
+      throwsArgumentError,
+    );
+    expect(
+      () => LoadOptions(clients: 1, ticks: 0, script: walk),
+      throwsArgumentError,
+    );
+    expect(
+      () => LoadOptions(
+        clients: 1,
+        ticks: 1,
+        script: walk,
+        period: Duration.zero,
+      ),
+      throwsArgumentError,
+    );
+  });
+
+  test(
+    'scripts: still sends nothing, random repeats and differs by client',
+    () {
+      expect(loadScripts['still']!(0, 0), isNull);
+
+      final random = loadScripts['random']!;
+      expect(random(3, 7), random(3, 7));
+      expect(random(3, 7), isNot(random(4, 7)));
+      expect(random(0, 100003), isNot(random(1, 0)));
+    },
+  );
 }

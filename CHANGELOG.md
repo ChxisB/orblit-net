@@ -4,11 +4,12 @@
 
 - Add `dart run orblit_net:load`. It runs a host with scripted clients on a
   real tick clock and prints where the tick went and how many bytes each
-  client was sent. It exits 1 when the average tick is longer than the
-  period.
-- Add `package:orblit_net/load.dart` with `runLoad`, `LoadOptions` and
-  `LoadReport`. A game passes its own function from tick to input, and its
-  own system, which is timed as the `system` phase.
+  client was sent. It exits 1 when the host's average tick is longer than the
+  period, and 2 when the host refused any input.
+- Add `package:orblit_net/load.dart` with `runLoad`, `LoadOptions`,
+  `LoadReport` and `parseLoadArgs`. A game can pass its own movement function,
+  and a function that stands in for its server systems, which is timed as the
+  `system` phase.
 - `tool/check.sh` formats `bin` as well.
 
 ## 0.2.0
