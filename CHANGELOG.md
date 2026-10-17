@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Add `InboundBudget` and `NetHost.budget`. A host drops a message over a
+  client's budget before decoding it and counts it as
+  `InputRejection.overBudget`. A client over budget for `strikes` ticks in a
+  row hears `GoodbyeReason.overBudget` and is disconnected, and its session
+  ends as removed.
+- Add `InputRejection.overBudget`. A `switch` over `InputRejection` needs a
+  new case.
+- A join over `bytesPerMessage` is refused before `admit` is called.
+
 ## 0.2.0
 
 - Add `SessionPolicy`, `Admission` (`Admit` and `Refuse`), `SessionState`,

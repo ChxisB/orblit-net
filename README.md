@@ -75,6 +75,36 @@ client.join(credentials);
   `publish`. The next `publish` carries on.
 - `dispose` ends no session and calls no `onGone`. Save before it.
 
+## Budgets
+
+A host limits what each client may send. The limits are per tick, so the
+clock stays yours. Divide by your tick rate to think in seconds.
+
+```dart
+final host = NetHost(
+  world: world,
+  set: set,
+  networkId: networkId,
+  budget: InboundBudget(
+    messagesPerTick: 100,
+    bytesPerMessage: 64 * 1024,
+    bytesPerTick: 256 * 1024,
+    strikes: 10,
+  ),
+);
+```
+
+- A message over any limit is dropped before it is decoded. The host counts
+  it in `rejections[InputRejection.overBudget]`.
+- Acknowledgements count too. Leave room for one per tick.
+- A client over budget for `strikes` ticks in a row hears
+  `GoodbyeReason.overBudget` and is disconnected. A session ends as removed,
+  so it cannot resume. A shorter burst does no harm.
+- A connection that has not joined is refused when one message passes
+  `bytesPerMessage`.
+- The defaults shown stop a flood, not a busy client. Tighten them from what
+  `host.rejections` reports.
+
 ## Licence
 
 MPL-2.0, © 2026 Chris Beckett. That is the Mozilla Public License, and it is
