@@ -42,6 +42,22 @@ host.publish();
 print(host.summary().phases['encode']?.average);
 ```
 
+## Load testing
+
+```sh
+dart run orblit_net:load --clients 200 --seconds 60 --script walk
+```
+
+This runs a host with 200 scripted clients, each moving one entity, and
+prints the tick, the drift, the time in each phase and the bytes each client
+was sent per second. Scripts are `still`, `walk` and `random`. `--sockets`
+uses WebSockets on localhost. `--slow-ms 20` adds a system that takes 20 ms,
+to see a slow phase show up. The command exits 1 when the average tick is
+longer than the period.
+
+The clients share the host's thread, so their decoding adds to drift. The
+phase table is the host's own cost. Only the last 300 ticks are measured.
+
 ## Licence
 
 MPL-2.0, © 2026 Chris Beckett. That is the Mozilla Public License, and it is
