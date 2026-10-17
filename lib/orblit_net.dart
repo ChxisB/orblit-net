@@ -21,4 +21,5 @@ export 'src/replication.dart' show ReplicatedComponent, ReplicationSet;
 export 'src/snapshot.dart'
     show SnapshotCapture, SnapshotGroup, SnapshotRow, WorldSnapshot;
 export 'src/socket_transport.dart' show SocketServer, SocketTransport;
+export 'src/tick_clock.dart' show TickClock;
 export 'src/transport.dart' show LoopbackLink, Transport;
