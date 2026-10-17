@@ -94,6 +94,21 @@ class SnapshotCodec {
     );
   }
 
+  /// The mask and row count of each group in [message], read without copying
+  /// the rows. It trusts the message, which is one this codec just encoded.
+  List<({int mask, int rows})> groupHeaders(Uint8List message) {
+    final data = ByteData.sublistView(message);
+    final headers = <({int mask, int rows})>[];
+    var offset = 26;
+    for (var g = data.getUint16(24, Endian.little); g > 0; g--) {
+      final rows = data.getUint32(offset + 8, Endian.little);
+      final stride = data.getUint32(offset + 12, Endian.little);
+      headers.add((mask: data.getUint64(offset, Endian.little), rows: rows));
+      offset += 16 + rows * (8 + stride);
+    }
+    return headers;
+  }
+
   DecodedSnapshot decode(Uint8List message) {
     final data = ByteData.sublistView(message);
     if (message.length < 26) {

@@ -8,7 +8,7 @@ class TickClock {
   /// [now] must be monotonic. A wall clock that resyncs reads as lag that
   /// never happened.
   TickClock({required this.period, Duration Function()? now})
-    : now = now ?? _stopwatchNow();
+    : now = now ?? monotonicNow();
 
   final Duration period;
   final Duration Function() now;
@@ -40,9 +40,10 @@ class TickClock {
     _drift = behind;
     _due = behind > period * 2 ? current + period : due + period;
   }
+}
 
-  static Duration Function() _stopwatchNow() {
-    final watch = Stopwatch()..start();
-    return () => watch.elapsed;
-  }
+/// Time since this call, read off a [Stopwatch] so it never goes backwards.
+Duration Function() monotonicNow() {
+  final watch = Stopwatch()..start();
+  return () => watch.elapsed;
 }

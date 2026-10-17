@@ -54,6 +54,13 @@ void main() {
     expect(encode.max, ms(8));
   });
 
+  test('a phase that takes no measurable time is still listed', () {
+    times.phase('instant', () {});
+    times.finish();
+
+    expect(times.summary().phases['instant']!.max, Duration.zero);
+  });
+
   test('returns what the body returns', () {
     expect(times.phase('x', () => 7), 7);
   });

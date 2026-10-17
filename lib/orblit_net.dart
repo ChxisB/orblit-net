@@ -17,7 +17,7 @@ export 'src/codec.dart'
     show DecodedSnapshot, SnapshotCodec, SnapshotFormatError;
 export 'src/host.dart' show InputRejection, NetHost;
 export 'src/input.dart' show InputEntry, InputMessage, decodeInput, encodeInput;
-export 'src/phase_times.dart' show PhaseStats, PhaseSummary;
+export 'src/phase_times.dart' show ClientBytes, PhaseStats, PhaseSummary;
 export 'src/replication.dart' show ReplicatedComponent, ReplicationSet;
 export 'src/snapshot.dart'
     show SnapshotCapture, SnapshotGroup, SnapshotRow, WorldSnapshot;
