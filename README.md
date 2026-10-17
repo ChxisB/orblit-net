@@ -18,6 +18,8 @@ git clone https://github.com/ChxisB/orblit.git       # beside this one
 - **Snapshots and deltas.** Deltas are built against the tick a client
   acknowledged, not the last thing sent. So a dropped message costs one larger
   snapshot, rather than a world that quietly drifts apart.
+- **Interest.** A rule picks the entities each client is told about, so bytes
+  grow with what a client can see and not with the size of the world.
 - **Ownership.** A client proposes and the authority decides. Only components
   declared owner-writable, and only on entities it agrees that client owns.
   Every refusal is counted rather than thrown away.
@@ -50,7 +52,7 @@ dart run orblit_net:load --clients 200 --seconds 60 --script walk
 
 This runs a host with 200 scripted clients, each moving one entity, and
 prints the tick, the drift, the time in each phase and the bytes each client
-was sent per second. Scripts are `still`, `walk` and `random`. `--sockets`
+was sent per second. Scripts are `still`, `walk`, `random` and `scatter`. `--sockets`
 uses WebSockets on localhost. `--slow-ms 20` adds a system that takes 20 ms,
 to see a slow phase show up. `--help` lists the rest.
 
@@ -152,6 +154,42 @@ final host = NetHost(
   10 to 60 times a second. A slower host raises the per-tick limits.
 - The transport has already received a message by the time the host
   drops it. The budget stops the host decoding and applying it.
+
+## Interest
+
+A host tells every client about every entity unless it has an interest rule.
+`GridInterest` tells a client about the entities within `ring` cells of its
+own.
+
+```dart
+final host = NetHost(
+  world: world,
+  set: set,
+  networkId: networkId,
+  interest: GridInterest(
+    set: set,
+    position: position,
+    grid: Grid(50),
+    ring: 1,
+  ),
+);
+```
+
+- The entities a client owns are its focus, and it always sees them. A
+  client that owns two far apart sees around both.
+- An entity that comes into view is sent whole, even if it has not changed
+  since the tick the client acknowledged. One that goes out of view is a
+  removal. A client that misses a message still converges, because each
+  delta is built against what that client was shown.
+- Position is the first and third floats of a vector of three, or the first
+  two of a vector of two. An entity with no finite position is seen only by
+  its owner.
+- Any class that implements `InterestRule` works in its place. `observe`
+  runs once a tick. `isRelevant` runs once per entity per client, and not
+  for entities the client owns.
+- `host.summary()` has an `interest` phase when there is a rule.
+- With `--cell 50`, the load command tells each client only about its own
+  cell. `--script scatter` spreads the clients over a map 1000 units across.
 
 ## Licence
 

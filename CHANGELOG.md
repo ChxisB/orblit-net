@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+- Add `InterestRule` and `NetHost.interest`. With a rule, each client is
+  told about the entities the rule lets through, and about the entities it
+  owns. One that comes into view is sent whole. One that goes out of view is
+  a removal.
+- Add `GridInterest`, `Grid` and `Cell`. A client sees the entities within
+  `ring` cells of its own entities.
+- A host now keeps what each client was sent, and builds a delta against
+  that. `historyDepth` counts those per client. A host with no rule behaves
+  as before.
+- The `history` phase is now `forget`, and there is an `interest` phase when
+  a rule is set.
+- Add `WorldSnapshot.filtered` and `SnapshotGroup.pick`.
+- `dart run orblit_net:load` takes `--cell N` and has a `scatter` script.
+  `LoadOptions` takes `cellSize`.
+
 ## 0.5.0
 
 - Add `InboundBudget` and `NetHost.budget`. A host drops a message over a
