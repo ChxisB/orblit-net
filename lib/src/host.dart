@@ -31,25 +31,21 @@ class _Client {
   int acknowledgedTick = 0;
 }
 
-/// A key's place in the host, kept while its connection is gone.
-class _Session {
-  _Session(this.index);
+/// A connection from [NetHost.accept]. It becomes a client once it is
+/// admitted.
+final class _Connection {
+  _Connection(this.transport, this.acceptedAt);
 
-  /// The client index written into the owner component. It survives a resume.
-  final int index;
+  final Transport transport;
 
-  /// The tick the connection dropped, or null while it is attached.
-  int? lingeringSince;
+  /// The host tick when it arrived, for the deadline to send a join.
+  final int acceptedAt;
 
-  SessionState get state =>
-      lingeringSince == null ? SessionState.live : SessionState.lingering;
+  late final StreamSubscription<Uint8List> subscription;
+
+  /// Set when the connection is admitted.
+  _Client? client;
 }
-
-/// Sent to a client whose join names a key that is already attached.
-const String _alreadyLive = 'alreadyLive';
-
-/// Sent to a connection that a takeover replaced.
-const String _replaced = 'replaced';
 
 /// Why an input was not applied. Counted rather than thrown: a hostile client
 /// should not be able to raise exceptions on the authority.
@@ -113,8 +109,14 @@ class NetHost {
   late final int _ownerWritableMask;
 
   final Map<String, _Client> _clients = {};
-  final Map<String, _Session> _sessions = {};
-  final Set<StreamSubscription<Uint8List>> _unjoined = {};
+
+  /// The client index of every live or lingering session, by key.
+  final Map<String, int> _sessionIndex = {};
+
+  /// The tick each lingering session lost its connection, by key.
+  final Map<String, int> _lingeringSince = {};
+
+  final Set<_Connection> _unjoined = {};
   final Map<int, WorldSnapshot> _history = {};
   final List<int> _historyOrder = [];
   final Map<int, int> _entityByNetworkId = {};
@@ -160,7 +162,9 @@ class NetHost {
     if (entity == null || component == null) return;
     if (!_world.isAlive(entity) || !_world.has(entity, component)) return;
 
-    final index = clientId == null ? 0 : (_clients[clientId]?.index ?? 0);
+    final index = clientId == null
+        ? 0
+        : (_sessionIndex[clientId] ?? _clients[clientId]?.index ?? 0);
     final bytes = _world.bytesOf(entity, component)!;
     ByteData.sublistView(bytes).setUint32(0, index, Endian.little);
   }
@@ -168,7 +172,10 @@ class NetHost {
   String? ownerOf(int networkId) => _ownerByNetworkId[networkId];
 
   /// Whether [key] is attached, lingering, or not known to this host.
-  SessionState? sessionState(String key) => _sessions[key]?.state;
+  SessionState? sessionState(String key) {
+    if (_lingeringSince.containsKey(key)) return SessionState.lingering;
+    return _sessionIndex.containsKey(key) ? SessionState.live : null;
+  }
 
   /// The authority's own entity for a network id, if it still exists.
   int? entityFor(int networkId) => _entityByNetworkId[networkId];
@@ -178,7 +185,7 @@ class NetHost {
   void despawn(int entity) => _world.destroyEntity(entity);
 
   void addClient(String id, Transport transport) {
-    if (_clients.containsKey(id)) {
+    if (_clients.containsKey(id) || _sessionIndex.containsKey(id)) {
       throw StateError('A client is already connected as "$id".');
     }
     late final _Client client;
@@ -192,7 +199,8 @@ class NetHost {
   Future<void> removeClient(String id) async {
     final client = _clients.remove(id);
     await client?.subscription.cancel();
-    if (_sessions.containsKey(id)) {
+    if (_sessionIndex.containsKey(id)) {
+      if (client != null) _turnAway(client.transport, GoodbyeReason.removed);
       _end(id, GoneReason.removed);
     } else if (client != null) {
       _releaseOwned(id);
@@ -203,94 +211,86 @@ class NetHost {
   /// counts. Needs [sessions].
   ///
   /// The join goes to the policy's `admit`. A refused connection hears why and
-  /// is closed, and leaves no session behind. A drop afterwards makes the
-  /// session linger rather than ending it.
+  /// is closed, and leaves no session behind. So does one that sends no join
+  /// within `joinTicks`. A drop after admission makes the session linger
+  /// rather than ending it.
   void accept(Transport transport) {
     final policy = sessions;
     if (policy == null) {
       throw StateError('Accepting connections needs a SessionPolicy.');
     }
 
-    _Client? client;
-    late final StreamSubscription<Uint8List> subscription;
-    subscription = transport.inbound.listen(
-      (message) {
-        final admitted = client;
-        if (admitted != null) {
-          _receive(admitted, message);
-          return;
-        }
-        final credentials = decodeJoin(message);
-        if (credentials == null) return;
-        client = _admit(policy, transport, subscription, credentials);
-        if (client != null) _unjoined.remove(subscription);
-      },
-      onDone: () {
-        _unjoined.remove(subscription);
-        _drop(client);
-      },
-      onError: (Object _) => _drop(client),
+    final connection = _Connection(transport, _tick);
+    connection.subscription = transport.inbound.listen(
+      (message) => _hear(policy, connection, message),
+      onDone: () => _lost(connection),
+      onError: (Object _) => _lost(connection),
     );
-    _unjoined.add(subscription);
+    _unjoined.add(connection);
   }
 
-  _Client? _admit(
-    SessionPolicy policy,
-    Transport transport,
-    StreamSubscription<Uint8List> subscription,
-    Uint8List credentials,
-  ) {
-    Admission verdict;
-    try {
-      verdict = policy.admit(credentials);
-    } on Exception {
-      verdict = const Refuse('refused');
+  void _hear(SessionPolicy policy, _Connection connection, Uint8List message) {
+    final client = connection.client;
+    if (client != null) {
+      _receive(client, message);
+      return;
     }
-    switch (verdict) {
+    final credentials = decodeJoin(message);
+    if (credentials == null) return;
+
+    switch (_verdict(policy, credentials)) {
       case Refuse(:final reason):
-        unawaited(subscription.cancel());
-        _unjoined.remove(subscription);
-        _turnAway(transport, reason);
-        return null;
+        _refuse(connection, reason);
       case Admit(:final key):
-        return _seat(policy, key, transport, subscription);
+        _seat(policy, key, connection);
+    }
+  }
+
+  Admission _verdict(SessionPolicy policy, Uint8List credentials) {
+    try {
+      return policy.admit(credentials);
+    } catch (_) {
+      // The bytes come from a client. Whatever the game's parser throws on
+      // them is a refusal, not a crash.
+      return const Refuse(GoodbyeReason.refused);
     }
   }
 
   /// Attaches a connection to [key]'s session, starting one if there is none.
-  _Client? _seat(
-    SessionPolicy policy,
-    String key,
-    Transport transport,
-    StreamSubscription<Uint8List> subscription,
-  ) {
+  void _seat(SessionPolicy policy, String key, _Connection connection) {
     final attached = _clients[key];
     if (attached != null) {
-      if (!policy.takeOver) {
-        unawaited(subscription.cancel());
-        _unjoined.remove(subscription);
-        _turnAway(transport, _alreadyLive);
-        return null;
+      // A client the game added itself has no session to take over.
+      if (!policy.takeOver || !_sessionIndex.containsKey(key)) {
+        _refuse(connection, GoodbyeReason.alreadyLive);
+        return;
       }
-      _turnAway(attached.transport, _replaced);
+      _turnAway(attached.transport, GoodbyeReason.replaced);
       _drop(attached);
     }
 
-    final session = _sessions[key];
+    final resumed = _sessionIndex.containsKey(key);
+    final index = _sessionIndex[key] ?? _nextClientIndex++;
     final client = _Client(
       key,
-      session?.index ?? _nextClientIndex++,
-      transport,
-      subscription,
+      index,
+      connection.transport,
+      connection.subscription,
     );
+    connection.client = client;
+    _unjoined.remove(connection);
     _clients[key] = client;
-    if (session == null) {
-      _sessions[key] = _Session(client.index);
-      policy.onJoin?.call(key);
-    } else {
-      session.lingeringSince = null;
-    }
-    return client;
+    _sessionIndex[key] = index;
+    _lingeringSince.remove(key);
+    // After the client is attached, so a throw here leaves a session that a
+    // drop can still move to lingering.
+    if (!resumed) policy.onJoin?.call(key);
+  }
+
+  void _refuse(_Connection connection, String reason) {
+    _unjoined.remove(connection);
+    unawaited(connection.subscription.cancel());
+    _turnAway(connection.transport, reason);
   }
 
   void _turnAway(Transport transport, String reason) {
@@ -298,20 +298,31 @@ class NetHost {
     unawaited(transport.close());
   }
 
-  /// Detaches a connection that went away and lets its session linger.
-  void _drop(_Client? client) {
-    if (client == null) return;
-    _clients.remove(client.id);
-    unawaited(client.subscription.cancel());
-    _sessions[client.id]?.lingeringSince = _tick;
+  /// A connection ended or failed. Its session, if it has one, lingers.
+  void _lost(_Connection connection) {
+    _unjoined.remove(connection);
+    final client = connection.client;
+    if (client != null) _drop(client);
+    unawaited(connection.transport.close());
   }
 
-  void _endLingering() {
+  /// Detaches a client's connection and lets its session linger.
+  void _drop(_Client client) {
+    _clients.remove(client.id);
+    unawaited(client.subscription.cancel());
+    _lingeringSince[client.id] = _tick;
+  }
+
+  void _expire() {
     final policy = sessions;
     if (policy == null) return;
-    for (final entry in _sessions.entries.toList()) {
-      final since = entry.value.lingeringSince;
-      if (since != null && _tick - since >= policy.lingerTicks) {
+    for (final connection in _unjoined.toList()) {
+      if (_tick - connection.acceptedAt >= policy.joinTicks) {
+        _refuse(connection, GoodbyeReason.joinTimeout);
+      }
+    }
+    for (final entry in _lingeringSince.entries.toList()) {
+      if (_tick - entry.value >= policy.lingerTicks) {
         _end(entry.key, GoneReason.disconnect);
       }
     }
@@ -320,7 +331,8 @@ class NetHost {
   /// Ends a session. The game is told first, while the key still owns what it
   /// owned, and whatever is left afterwards reverts to the authority.
   void _end(String key, GoneReason reason) {
-    _sessions.remove(key);
+    _sessionIndex.remove(key);
+    _lingeringSince.remove(key);
     try {
       sessions?.onGone?.call(key, reason);
     } finally {
@@ -401,7 +413,7 @@ class NetHost {
   /// the diff is per client, and that is a comparison rather than a re-read.
   void publish() {
     _tick++;
-    _endLingering();
+    _expire();
     final current = _capture.capture(_tick);
 
     for (final client in _clients.values) {
@@ -435,14 +447,16 @@ class NetHost {
   }
 
   Future<void> dispose() async {
-    for (final client in _clients.values) {
+    // Copies, because a connection that closes while this awaits is dropped.
+    for (final client in _clients.values.toList()) {
       await client.subscription.cancel();
     }
-    for (final subscription in _unjoined.toList()) {
-      await subscription.cancel();
+    for (final connection in _unjoined.toList()) {
+      await connection.subscription.cancel();
     }
     _clients.clear();
-    _sessions.clear();
+    _sessionIndex.clear();
+    _lingeringSince.clear();
     _unjoined.clear();
     _capture.dispose();
   }

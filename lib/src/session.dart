@@ -38,15 +38,35 @@ enum GoneReason {
   removed,
 }
 
+/// The reasons a host puts in a goodbye. A game's own refusals may say
+/// anything else.
+abstract final class GoodbyeReason {
+  /// A second join for a key that is attached, on a host without `takeOver`.
+  static const String alreadyLive = 'alreadyLive';
+
+  /// The same key joined again on a host with `takeOver`.
+  static const String replaced = 'replaced';
+
+  /// The game called `removeClient`.
+  static const String removed = 'removed';
+
+  /// The game's `admit` threw.
+  static const String refused = 'refused';
+
+  /// No join arrived within `joinTicks`.
+  static const String joinTimeout = 'joinTimeout';
+}
+
 /// How a host treats the clients it admits.
 ///
 /// Orblit checks nothing about who someone is. [admit] is given the bytes the
-/// client sent and answers for the game; encrypting the link belongs to the
-/// transport.
+/// client sent and answers for the game. It runs inside the host, so it
+/// answers at once: check a ticket the game already holds, not a database.
 final class SessionPolicy {
   SessionPolicy({
     required this.admit,
     this.lingerTicks = 600,
+    this.joinTicks = 300,
     this.takeOver = false,
     this.onJoin,
     this.onGone,
@@ -58,6 +78,9 @@ final class SessionPolicy {
         'Must be 0 or more',
       );
     }
+    if (joinTicks < 1) {
+      throw ArgumentError.value(joinTicks, 'joinTicks', 'Must be 1 or more');
+    }
   }
 
   /// Turns what a client sent at join into a key or a refusal. A throw
@@ -66,6 +89,10 @@ final class SessionPolicy {
 
   /// Host ticks a dropped session keeps its entities.
   final int lingerTicks;
+
+  /// Host ticks a connection may stay silent before it sends a join. After
+  /// that it hears `joinTimeout` and is closed.
+  final int joinTicks;
 
   /// What a second join for a live key does: false refuses it with
   /// `alreadyLive`, true sends the old connection away with `replaced` and
@@ -76,6 +103,8 @@ final class SessionPolicy {
   final void Function(String key)? onJoin;
 
   /// A session ended, once. The key still owns its entities during the call,
-  /// so the game can find them, save them and despawn them.
+  /// so the game can find them, save them and despawn them. A throw leaves
+  /// the session ended and its entities released, and propagates out of
+  /// `publish`; the next `publish` carries on.
   final void Function(String key, GoneReason reason)? onGone;
 }

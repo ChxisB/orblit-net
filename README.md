@@ -50,8 +50,13 @@ client.join(credentials);
 
 - `admit` gets the bytes the client sent and answers `Admit(key)` or
   `Refuse(reason)`. A throw refuses the join. Orblit checks nothing about who
-  someone is. Use `wss` on the socket if the bytes must stay private.
+  someone is. It answers at once, so check a ticket the game already holds.
+  `SocketServer` speaks plain `ws://`. Put a TLS proxy in front of it when
+  the bytes must stay private.
 - A refused client gets the reason in `onGoodbye` and the connection closes.
+  The engine's own reasons are the constants in `GoodbyeReason`.
+- A connection that sends no join within `joinTicks` hears `joinTimeout` and
+  is closed.
 - The key is the client id, so `spawn(entity, owner: key)` ties an entity to
   the player.
 - When a connection drops, the session lingers. Its entities stay and no
@@ -64,7 +69,10 @@ client.join(credentials);
 - After `lingerTicks` ticks, `onGone(key, GoneReason.disconnect)` runs once.
   The key still owns its entities during the call, so the game can save and
   despawn them. Whatever is left then reverts to the authority.
-- `removeClient(key)` ends a session at once with `GoneReason.removed`.
+- `removeClient(key)` ends a session at once with `GoneReason.removed` and
+  tells the client `removed`.
+- A throw in `onGone` ends the session anyway, and propagates out of
+  `publish`. The next `publish` carries on.
 - `dispose` ends no session and calls no `onGone`. Save before it.
 
 ## Licence

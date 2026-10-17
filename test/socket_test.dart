@@ -136,6 +136,62 @@ void main() {
     expect(transport.isOpen, isFalse);
     expect(() => transport.send(Uint8List(4)), returnsNormally);
   });
+
+  test('a session survives a dropped socket and resumes', () async {
+    final server = await SocketServer.bind();
+    addTearDown(server.close);
+
+    final authority = Peer(reversed: false);
+    final replica = Peer(reversed: true);
+    addTearDown(authority.dispose);
+    addTearDown(replica.dispose);
+
+    final netHost = NetHost(
+      world: authority.world,
+      set: authority.set,
+      networkId: authority.networkId,
+      sessions: SessionPolicy(
+        admit: (bytes) => Admit(String.fromCharCodes(bytes)),
+        lingerTicks: 100,
+      ),
+    );
+    addTearDown(netHost.dispose);
+    final accepted = server.connections.listen(netHost.accept);
+    addTearDown(accepted.cancel);
+
+    NetClient newClient(Transport transport) => NetClient(
+      world: replica.world,
+      set: replica.set,
+      networkId: replica.networkId,
+      transport: transport,
+    );
+
+    final first = await SocketTransport.connect(server.url);
+    final firstClient = newClient(first);
+    firstClient.join(Uint8List.fromList('ann'.codeUnits));
+    await until(
+      () => netHost.sessionState('ann') == SessionState.live,
+      reason: 'the join to be admitted',
+    );
+
+    await first.close();
+    await firstClient.dispose();
+    await until(
+      () => netHost.sessionState('ann') == SessionState.lingering,
+      reason: 'the drop to be noticed',
+    );
+
+    final second = await SocketTransport.connect(server.url);
+    final secondClient = newClient(second);
+    addTearDown(second.close);
+    addTearDown(secondClient.dispose);
+    secondClient.join(Uint8List.fromList('ann'.codeUnits));
+    await until(
+      () => netHost.sessionState('ann') == SessionState.live,
+      reason: 'the rejoin to resume the session',
+    );
+    expect(netHost.clientCount, 1);
+  });
 }
 
 /// A one-request HTTP client, kept here so the test needs no dependency.
