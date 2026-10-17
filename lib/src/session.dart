@@ -55,6 +55,9 @@ abstract final class GoodbyeReason {
 
   /// No join arrived within `joinTicks`.
   static const String joinTimeout = 'joinTimeout';
+
+  /// The client stayed over its `InboundBudget`.
+  static const String overBudget = 'overBudget';
 }
 
 /// How a host treats the clients it admits.

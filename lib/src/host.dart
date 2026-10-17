@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:orblit_core/orblit_core.dart';
 
 import 'ack.dart';
+import 'budget.dart';
 import 'codec.dart';
 import 'input.dart';
 import 'replication.dart';
@@ -29,6 +30,9 @@ class _Client {
   /// so a client that falls silent gets larger messages rather than a world
   /// that drifts.
   int acknowledgedTick = 0;
+
+  /// What this client has sent since the last tick.
+  final BudgetMeter meter = BudgetMeter();
 }
 
 /// A connection from [NetHost.accept]. It becomes a client once it is
@@ -61,6 +65,9 @@ enum InputRejection {
 
   /// The payload did not match the components it claimed to carry.
   malformed,
+
+  /// A whole message dropped unread because the client sent too much.
+  overBudget,
 }
 
 /// The authority: it owns the world and tells clients what happened.
@@ -72,7 +79,9 @@ class NetHost {
     ComponentType? ownerComponent,
     this.historyDepth = 64,
     this.sessions,
-  }) : _world = world,
+    InboundBudget? budget,
+  }) : budget = budget ?? InboundBudget(),
+       _world = world,
        _networkId = networkId,
        _ownerComponent = ownerComponent,
        _capture = SnapshotCapture(
@@ -105,6 +114,10 @@ class NetHost {
   /// How clients are admitted, kept across a drop and ended. Null for a host
   /// whose game adds clients itself with [addClient].
   final SessionPolicy? sessions;
+
+  /// What each client may send between two ticks. One that stays over it is
+  /// cut off.
+  final InboundBudget budget;
 
   late final int _ownerWritableMask;
 
@@ -235,6 +248,11 @@ class NetHost {
       _receive(client, message);
       return;
     }
+    if (message.length > budget.bytesPerMessage) {
+      _reject(InputRejection.overBudget);
+      _refuse(connection, GoodbyeReason.overBudget);
+      return;
+    }
     final credentials = decodeJoin(message);
     if (credentials == null) return;
 
@@ -353,6 +371,14 @@ class NetHost {
   }
 
   void _receive(_Client client, Uint8List message) {
+    // Before any decoding, so a flood costs a length check and no more.
+    if (!client.meter.allows(budget, message.length)) {
+      client.meter.refuse();
+      _reject(InputRejection.overBudget);
+      return;
+    }
+    client.meter.count(message.length);
+
     final acknowledged = decodeAck(message);
     if (acknowledged != null) {
       if (acknowledged > client.acknowledgedTick) {
@@ -413,6 +439,7 @@ class NetHost {
   /// the diff is per client, and that is a comparison rather than a re-read.
   void publish() {
     _tick++;
+    _cutOffFloods();
     _expire();
     final current = _capture.capture(_tick);
 
@@ -426,6 +453,31 @@ class NetHost {
 
     _remember(current);
     _forgetDeadEntities(current);
+  }
+
+  /// Closes every client's tick, then disconnects the ones that stayed over
+  /// budget. Their session ends as removed, so a flooder cannot resume it.
+  void _cutOffFloods() {
+    for (final client in _clients.values) {
+      client.meter.endTick();
+    }
+    final flooders = _clients.values
+        .where((client) => client.meter.isOver(budget))
+        .toList();
+    for (final client in flooders) {
+      _kick(client, GoodbyeReason.overBudget);
+    }
+  }
+
+  void _kick(_Client client, String reason) {
+    _clients.remove(client.id);
+    unawaited(client.subscription.cancel());
+    _turnAway(client.transport, reason);
+    if (_sessionIndex.containsKey(client.id)) {
+      _end(client.id, GoneReason.removed);
+    } else {
+      _releaseOwned(client.id);
+    }
   }
 
   void _forgetDeadEntities(WorldSnapshot current) {

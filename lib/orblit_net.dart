@@ -12,6 +12,7 @@
 library;
 
 export 'src/ack.dart' show decodeAck, encodeAck;
+export 'src/budget.dart' show InboundBudget;
 export 'src/client.dart' show NetClient;
 export 'src/codec.dart'
     show DecodedSnapshot, SnapshotCodec, SnapshotFormatError;
