@@ -186,8 +186,8 @@ class NetHost {
   /// The client index of every live or lingering session, by key.
   final Map<String, int> _sessionIndex = {};
 
-  /// The tick each lingering session lost its connection, by key.
-  final Map<String, int> _lingeringSince = {};
+  /// The tick each lingering session ends if nobody comes back, by key.
+  final Map<String, int> _lingerUntil = {};
 
   final Set<_Connection> _unjoined = {};
   final Map<int, int> _entityByNetworkId = {};
@@ -259,7 +259,7 @@ class NetHost {
 
   /// Whether [key] is attached, lingering, or not known to this host.
   SessionState? sessionState(String key) {
-    if (_lingeringSince.containsKey(key)) return SessionState.lingering;
+    if (_lingerUntil.containsKey(key)) return SessionState.lingering;
     return _sessionIndex.containsKey(key) ? SessionState.live : null;
   }
 
@@ -396,7 +396,7 @@ class NetHost {
     _unjoined.remove(connection);
     _clients[key] = client;
     _sessionIndex[key] = index;
-    _lingeringSince.remove(key);
+    _lingerUntil.remove(key);
     // After the client is attached, so a throw here leaves a session that a
     // drop can still move to lingering.
     if (!resumed) policy.onJoin?.call(key);
@@ -425,7 +425,20 @@ class NetHost {
   void _drop(_Client client) {
     _clients.remove(client.id);
     unawaited(client.subscription.cancel());
-    _lingeringSince[client.id] = _tick;
+    _lingerUntil[client.id] = _tick + _lingerFor(client.id);
+  }
+
+  int _lingerFor(String key) {
+    final policy = sessions!; // a client only exists on a host with a policy
+    final custom = policy.lingerFor;
+    if (custom == null) return policy.lingerTicks;
+    try {
+      return custom(key);
+    } catch (_) {
+      // The game's rule failed. The session still needs an end, so it gets
+      // the default.
+      return policy.lingerTicks;
+    }
   }
 
   void _expire() {
@@ -436,10 +449,8 @@ class NetHost {
         _refuse(connection, GoodbyeReason.joinTimeout);
       }
     }
-    for (final entry in _lingeringSince.entries.toList()) {
-      if (_tick - entry.value >= policy.lingerTicks) {
-        _end(entry.key, GoneReason.disconnect);
-      }
+    for (final entry in _lingerUntil.entries.toList()) {
+      if (_tick >= entry.value) _end(entry.key, GoneReason.disconnect);
     }
   }
 
@@ -447,7 +458,7 @@ class NetHost {
   /// owned, and whatever is left afterwards reverts to the authority.
   void _end(String key, GoneReason reason) {
     _sessionIndex.remove(key);
-    _lingeringSince.remove(key);
+    _lingerUntil.remove(key);
     try {
       sessions?.onGone?.call(key, reason);
     } finally {
@@ -661,7 +672,7 @@ class NetHost {
     }
     _clients.clear();
     _sessionIndex.clear();
-    _lingeringSince.clear();
+    _lingerUntil.clear();
     _unjoined.clear();
     _capture.dispose();
   }

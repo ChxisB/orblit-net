@@ -77,6 +77,7 @@ final class SessionPolicy {
     this.lingerTicks = 600,
     this.joinTicks = 300,
     this.takeOver = false,
+    this.lingerFor,
     this.onJoin,
     this.onGone,
   }) {
@@ -98,6 +99,12 @@ final class SessionPolicy {
 
   /// Host ticks a dropped session keeps its entities.
   final int lingerTicks;
+
+  /// Host ticks the session of one key keeps its entities, asked when the
+  /// connection drops. A game uses it to keep a player in a fight in the
+  /// world for longer. Without it every session gets [lingerTicks]. A
+  /// negative answer is zero, and a throw gives [lingerTicks].
+  final int Function(String key)? lingerFor;
 
   /// Host ticks a connection may stay silent before it sends a join. After
   /// that it hears `joinTimeout` and is closed.

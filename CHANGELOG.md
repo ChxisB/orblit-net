@@ -7,6 +7,8 @@
   connection that closed or timed out meanwhile is dropped, and a second
   join from a connection that is still waiting is ignored. A plain answer
   works as before.
+- Add `SessionPolicy.lingerFor`. It picks how long one key's session
+  lingers, asked when its connection drops.
 
 ## 0.8.0
 

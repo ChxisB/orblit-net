@@ -102,6 +102,7 @@ void main() {
   NetHost build({
     bool takeOver = false,
     int joinTicks = 300,
+    int Function(String)? lingerFor,
     FutureOr<Admission> Function(Uint8List) admit = admitByName,
   }) {
     return NetHost(
@@ -112,6 +113,7 @@ void main() {
       sessions: SessionPolicy(
         admit: admit,
         lingerTicks: 3,
+        lingerFor: lingerFor,
         joinTicks: joinTicks,
         takeOver: takeOver,
         onJoin: (String key) {
@@ -536,6 +538,50 @@ void main() {
 
       await publish(5);
       expect(gone, hasLength(1));
+    });
+
+    test('lingerFor sets the wait and is asked for the key', () async {
+      await host.dispose();
+      final asked = <String>[];
+      host = build(
+        lingerFor: (key) {
+          asked.add(key);
+          return 6;
+        },
+      );
+      final ann = connect(as: 'ann');
+      await settle();
+      await drop(ann);
+
+      await publish(5);
+      expect(gone, isEmpty);
+      await publish(1);
+      expect(gone, [('ann', GoneReason.disconnect)]);
+      expect(asked, ['ann']);
+    });
+
+    test('a negative lingerFor ends the session at once', () async {
+      await host.dispose();
+      host = build(lingerFor: (_) => -5);
+      final ann = connect(as: 'ann');
+      await settle();
+      await drop(ann);
+      await publish(1);
+
+      expect(gone, [('ann', GoneReason.disconnect)]);
+    });
+
+    test('a lingerFor that throws gives the default wait', () async {
+      await host.dispose();
+      host = build(lingerFor: (_) => throw StateError('no rule'));
+      final ann = connect(as: 'ann');
+      await settle();
+      await drop(ann);
+
+      await publish(2);
+      expect(gone, isEmpty);
+      await publish(1);
+      expect(gone, [('ann', GoneReason.disconnect)]);
     });
 
     test('a resume in time means it never ends', () async {

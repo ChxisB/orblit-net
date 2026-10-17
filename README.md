@@ -110,6 +110,7 @@ client.join(credentials);
   `takeOver: true` the old connection hears `replaced` and the new one
   resumes the session.
 - After `lingerTicks` ticks, `onGone(key, GoneReason.disconnect)` runs once.
+  `lingerFor(key)` picks the wait for one key when its connection drops.
   The key still owns its entities during the call, so the game can save and
   despawn them. Whatever is left then reverts to the authority.
 - `removeClient(key)` ends a session at once with `GoneReason.removed` and
