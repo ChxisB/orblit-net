@@ -18,6 +18,8 @@ export 'src/codec.dart'
 export 'src/host.dart' show InputRejection, NetHost;
 export 'src/input.dart' show InputEntry, InputMessage, decodeInput, encodeInput;
 export 'src/replication.dart' show ReplicatedComponent, ReplicationSet;
+export 'src/session.dart'
+    show Admission, Admit, GoneReason, Refuse, SessionPolicy, SessionState;
 export 'src/snapshot.dart'
     show SnapshotCapture, SnapshotGroup, SnapshotRow, WorldSnapshot;
 export 'src/socket_transport.dart' show SocketServer, SocketTransport;

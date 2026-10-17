@@ -1,0 +1,81 @@
+import 'dart:typed_data';
+
+/// What the game decides about a join.
+sealed class Admission {
+  const Admission();
+}
+
+/// The join is welcome. [key] names the player for as long as the session
+/// lives, usually an account id, and is the client id the host uses.
+final class Admit extends Admission {
+  const Admit(this.key);
+
+  final String key;
+}
+
+/// The join is turned away. [reason] is sent to the client as text.
+final class Refuse extends Admission {
+  const Refuse(this.reason);
+
+  final String reason;
+}
+
+enum SessionState {
+  /// A connection is attached.
+  live,
+
+  /// The connection is gone. The entities stay for [SessionPolicy.lingerTicks]
+  /// ticks, and a join with the same key takes them back.
+  lingering,
+}
+
+/// Why a session ended.
+enum GoneReason {
+  /// It lingered for [SessionPolicy.lingerTicks] ticks and nobody came back.
+  disconnect,
+
+  /// The game called `NetHost.removeClient`.
+  removed,
+}
+
+/// How a host treats the clients it admits.
+///
+/// Orblit checks nothing about who someone is. [admit] is given the bytes the
+/// client sent and answers for the game; encrypting the link belongs to the
+/// transport.
+final class SessionPolicy {
+  SessionPolicy({
+    required this.admit,
+    this.lingerTicks = 600,
+    this.takeOver = false,
+    this.onJoin,
+    this.onGone,
+  }) {
+    if (lingerTicks < 0) {
+      throw ArgumentError.value(
+        lingerTicks,
+        'lingerTicks',
+        'Must be 0 or more',
+      );
+    }
+  }
+
+  /// Turns what a client sent at join into a key or a refusal. A throw
+  /// refuses the join, since the bytes come from a client.
+  final Admission Function(Uint8List credentials) admit;
+
+  /// Host ticks a dropped session keeps its entities.
+  final int lingerTicks;
+
+  /// What a second join for a live key does: false refuses it with
+  /// `alreadyLive`, true sends the old connection away with `replaced` and
+  /// resumes the session on the new one.
+  final bool takeOver;
+
+  /// A key joined for the first time. The game creates its entities here.
+  final void Function(String key)? onJoin;
+
+  /// A session ended, once. The key still owns its entities during the call,
+  /// so the game can find them, save them and despawn them.
+  final void Function(String key, GoneReason reason)? onGone;
+}
