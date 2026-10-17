@@ -1,7 +1,7 @@
 import 'tick_clock.dart';
 
 /// How long one named phase took across a window of ticks.
-class PhaseStats {
+final class PhaseStats {
   const PhaseStats({
     required this.total,
     required this.average,
@@ -18,7 +18,7 @@ class PhaseStats {
 }
 
 /// What one client was sent, split by component column.
-class ClientBytes {
+final class ClientBytes {
   const ClientBytes({required this.columns, required this.overhead});
 
   /// Bytes of component data, keyed by component name.
@@ -31,7 +31,7 @@ class ClientBytes {
 }
 
 /// Where the time went over the last few ticks.
-class PhaseSummary {
+final class PhaseSummary {
   const PhaseSummary({
     required this.ticks,
     required this.tickAverage,
@@ -49,17 +49,18 @@ class PhaseSummary {
   final Duration driftMax;
   final Map<String, PhaseStats> phases;
 
-  /// Per client, totals since the host started. The window does not apply:
-  /// a window would need a map per client per tick.
+  /// Per client, totals since the host started. The window does not apply.
+  // shortcut: totals, not windowed, since a window needs a map per client per
+  // tick. Window them if a view needs a rate.
   final Map<String, ClientBytes> bytesSent;
 }
 
-class _Sent {
+final class _Sent {
   final Map<String, int> columns = {};
   int overhead = 0;
 }
 
-class _Tick {
+final class _Tick {
   _Tick(this.start, this.drift);
 
   final Duration start;
@@ -74,7 +75,7 @@ class _Tick {
 /// at [finish]. Opening asks the clock to begin, so drift is measured where
 /// the tick starts, not where it is reported. With no clock, phases are still
 /// timed and there is no drift or overrun to report.
-class PhaseTimes {
+final class PhaseTimes {
   PhaseTimes({TickClock? clock, this.onOverrun, this.capacity = 300})
     : _clock = clock,
       _now = clock?.now ?? monotonicNow();
@@ -95,6 +96,7 @@ class PhaseTimes {
 
   /// Runs [body], adds its time to the open tick under [name], and returns
   /// what it returned. Run twice in a tick, a name adds up.
+  // F5: it returns what [body] returns so a stage can wrap an expression.
   T phase<T>(String name, T Function() body) {
     final tick = _open ??= _begin();
     final start = _now();
@@ -137,6 +139,8 @@ class PhaseTimes {
     return _summarise(window, _sent);
   }
 
+  // F5: starting a tick and handing it back is one step. The callers would
+  // otherwise each repeat the null check on the open tick.
   _Tick _begin() {
     final clock = _clock;
     clock?.begin();

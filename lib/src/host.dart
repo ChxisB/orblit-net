@@ -116,6 +116,7 @@ class NetHost {
 
   /// Runs [body] as a named part of the current tick and times it, so a
   /// game's own systems show up in [summary] beside the host's stages.
+  // F5: it returns what [body] returns so a stage can wrap an expression.
   T phase<T>(String name, T Function() body) => _times.phase(name, body);
 
   /// Where the last [last] ticks went, and what each client was sent.
@@ -247,25 +248,30 @@ class NetHost {
   /// the diff is per client, and that is a comparison rather than a re-read.
   void publish() {
     _tick++;
-    final current = _times.phase('capture', () => _capture.capture(_tick));
+    try {
+      final current = _times.phase('capture', () => _capture.capture(_tick));
 
-    for (final client in _clients.values) {
-      final baseline = _history[client.acknowledgedTick];
-      final message = _times.phase(
-        'encode',
-        () => baseline == null
-            ? _codec.encodeFull(current)
-            : _codec.encodeDelta(current, baseline),
-      );
-      _times.phase('send', () => client.transport.send(message));
-      _times.phase('count', () => _countSent(client.id, message));
+      // Per-client stages add up across clients within a tick.
+      for (final client in _clients.values) {
+        final baseline = _history[client.acknowledgedTick];
+        final message = _times.phase(
+          'encode',
+          () => baseline == null
+              ? _codec.encodeFull(current)
+              : _codec.encodeDelta(current, baseline),
+        );
+        _times.phase('send', () => client.transport.send(message));
+        _times.phase('count', () => _countSent(client.id, message));
+      }
+
+      _times.phase('history', () {
+        _remember(current);
+        _forgetDeadEntities(current);
+      });
+    } finally {
+      // A tick that throws still closes, so the next one is not merged into it.
+      _times.finish();
     }
-
-    _times.phase('history', () {
-      _remember(current);
-      _forgetDeadEntities(current);
-    });
-    _times.finish();
   }
 
   /// Splits what one message cost by component column. Whatever is not a

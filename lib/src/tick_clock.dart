@@ -4,7 +4,7 @@
 /// period after it ran, so a late tick does not shift the ones behind it.
 /// When the clock falls more than two periods behind, it restarts from now
 /// instead of running ticks back to back, which would stall the host further.
-class TickClock {
+final class TickClock {
   /// [now] must be monotonic. A wall clock that resyncs reads as lag that
   /// never happened.
   TickClock({required this.period, Duration Function()? now})
@@ -16,8 +16,9 @@ class TickClock {
   Duration? _due;
   Duration? _drift;
 
-  /// How late the last tick started. Null until the second tick, since the
-  /// first one only sets the schedule.
+  /// How late the last tick started, never negative: the clock only advises,
+  /// and a tick that starts early is not late. Null until the second tick,
+  /// since the first one only sets the schedule.
   Duration? get drift => _drift;
 
   /// How long until a tick is due. Zero when one is due now.
@@ -37,7 +38,7 @@ class TickClock {
       return;
     }
     final behind = current - due;
-    _drift = behind;
+    _drift = behind.isNegative ? Duration.zero : behind;
     _due = behind > period * 2 ? current + period : due + period;
   }
 }

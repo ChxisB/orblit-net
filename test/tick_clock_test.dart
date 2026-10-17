@@ -26,6 +26,14 @@ void main() {
     expect(clock.drift, const Duration(milliseconds: 8));
   });
 
+  test('a tick that starts early is not late', () {
+    clock.begin();
+    now = const Duration(milliseconds: 40);
+    clock.begin();
+    expect(clock.drift, Duration.zero);
+    expect(clock.untilNext(), const Duration(milliseconds: 60));
+  });
+
   test('the next tick keeps its phase after a late one', () {
     clock.begin();
     now = const Duration(milliseconds: 58);
