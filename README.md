@@ -95,15 +95,25 @@ final host = NetHost(
 ```
 
 - A message over any limit is dropped before it is decoded. The host counts
-  it in `rejections[InputRejection.overBudget]`.
-- Acknowledgements count too. Leave room for one per tick.
-- A client over budget for `strikes` ticks in a row hears
-  `GoodbyeReason.overBudget` and is disconnected. A session ends as removed,
-  so it cannot resume. A shorter burst does no harm.
-- A connection that has not joined is refused when one message passes
-  `bytesPerMessage`.
-- The defaults shown stop a flood, not a busy client. Tighten them from what
-  `host.rejections` reports.
+  it in `rejections[InputRejection.overBudget]`. That counts messages, where
+  the other reasons count entries inside an input.
+- Everything counts: acknowledgements, inputs and the join. Leave room for
+  one acknowledgement per tick, and keep `bytesPerMessage` above the size of
+  your credentials.
+- A tick with something dropped adds a strike to the client. A tick with
+  nothing dropped takes one off. At `strikes` the client hears
+  `GoodbyeReason.overBudget` and is disconnected. A short burst does no harm,
+  and a client cannot dodge the limit with the odd quiet tick.
+- A session ends with `GoneReason.overBudget`, so the game can tell a flood
+  from `removeClient` and can refuse the key in `admit`. A client you added
+  with `addClient` is closed and its entities revert to the host. A host
+  with no session policy has no callback, so watch `clientCount`.
+- A connection that has not joined has one tick's budget in total, and is
+  closed when it passes it.
+- Every host has a default budget. The values above suit a host that ticks
+  10 to 60 times a second. A slower host raises the per-tick limits.
+- The transport has already received a message by the time the host
+  drops it. The budget stops the host decoding and applying it.
 
 ## Licence
 

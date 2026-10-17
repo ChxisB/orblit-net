@@ -7,7 +7,7 @@ import 'package:orblit_net/orblit_net.dart';
 import 'package:orblit_net/src/session_message.dart';
 import 'package:test/test.dart';
 
-Future<void> settle() => Future<void>.delayed(Duration.zero);
+import 'support/loopback.dart';
 
 Uint8List credentials(String name) => Uint8List.fromList(utf8.encode(name));
 

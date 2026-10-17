@@ -2,8 +2,14 @@
 ///
 /// The limits are per tick, not per second, so the host's clock stays a
 /// parameter. A game that thinks in seconds divides by its tick rate. The
-/// defaults are loose: they stop a flood, not a busy client. A game tightens
-/// them from what the host's counters show.
+/// defaults are loose: they stop a flood, not a busy client, for a host that
+/// ticks 10 to 60 times a second. A host that ticks slower raises the
+/// per-tick limits. A game tightens them from what the host's counters show.
+///
+/// Everything a client sends counts, acknowledgements and the join included,
+/// so [bytesPerMessage] must fit the game's credentials. A message over a limit
+/// has already been received by the transport. This stops the host decoding
+/// and applying it, not the transport reading it.
 final class InboundBudget {
   InboundBudget({
     this.messagesPerTick = 100,
@@ -26,8 +32,10 @@ final class InboundBudget {
   /// Bytes a client may send between two ticks, all messages together.
   final int bytesPerTick;
 
-  /// Ticks in a row with something dropped before the client is cut off. A
-  /// burst shorter than this does no harm.
+  /// How far over its record a client may get before it is cut off. A tick
+  /// with something dropped adds one. A tick with nothing dropped takes one
+  /// off. A burst shorter than this does no harm, and a client cannot dodge
+  /// the limit with the odd quiet tick.
   final int strikes;
 
   static void _atLeastOne(int value, String name) {
@@ -57,9 +65,13 @@ final class BudgetMeter {
   /// Marks this tick as over budget.
   void refuse() => _refused = true;
 
-  /// Closes the tick: a strike if anything was refused, none otherwise.
+  /// Closes the tick: a strike if anything was refused, one forgiven if not.
   void endTick() {
-    _strikes = _refused ? _strikes + 1 : 0;
+    if (_refused) {
+      _strikes++;
+    } else if (_strikes > 0) {
+      _strikes--;
+    }
     _messages = 0;
     _bytes = 0;
     _refused = false;

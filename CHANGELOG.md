@@ -4,12 +4,18 @@
 
 - Add `InboundBudget` and `NetHost.budget`. A host drops a message over a
   client's budget before decoding it and counts it as
-  `InputRejection.overBudget`. A client over budget for `strikes` ticks in a
-  row hears `GoodbyeReason.overBudget` and is disconnected, and its session
-  ends as removed.
+  `InputRejection.overBudget`. A tick with something dropped adds a strike
+  and a clean tick takes one off. At `strikes` the client hears
+  `GoodbyeReason.overBudget` and is disconnected.
+- Every `NetHost` now has a default budget, loose enough for 10 to 60 ticks
+  a second. A host that ticks slower, or whose clients send more than 100
+  messages a tick, passes its own `InboundBudget`.
 - Add `InputRejection.overBudget`. A `switch` over `InputRejection` needs a
   new case.
-- A join over `bytesPerMessage` is refused before `admit` is called.
+- Add `GoneReason.overBudget`. A session ends with it when its client is cut
+  off.
+- A connection that has not joined has one tick's budget in total. A join
+  over `bytesPerMessage` is refused before `admit` is called.
 
 ## 0.2.0
 

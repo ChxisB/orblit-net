@@ -36,6 +36,9 @@ enum GoneReason {
 
   /// The game called `NetHost.removeClient`.
   removed,
+
+  /// The host cut the client off for staying over its `InboundBudget`.
+  overBudget,
 }
 
 /// The reasons a host puts in a goodbye. A game's own refusals may say

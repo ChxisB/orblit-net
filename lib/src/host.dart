@@ -47,11 +47,15 @@ final class _Connection {
 
   late final StreamSubscription<Uint8List> subscription;
 
+  /// Counts everything sent before the join. It is never reset, so a
+  /// connection that has not joined has one tick's budget in total.
+  final BudgetMeter meter = BudgetMeter();
+
   /// Set when the connection is admitted.
   _Client? client;
 }
 
-/// Why an input was not applied. Counted rather than thrown: a hostile client
+/// Why an input, or a whole message, was not applied. Counted rather than thrown: a hostile client
 /// should not be able to raise exceptions on the authority.
 enum InputRejection {
   /// No entity with that network id.
@@ -66,7 +70,9 @@ enum InputRejection {
   /// The payload did not match the components it claimed to carry.
   malformed,
 
-  /// A whole message dropped unread because the client sent too much.
+  /// A whole message dropped unread because the client sent too much. The
+  /// other reasons count entries inside an input. This one counts messages,
+  /// whatever they carried.
   overBudget,
 }
 
@@ -248,11 +254,12 @@ class NetHost {
       _receive(client, message);
       return;
     }
-    if (message.length > budget.bytesPerMessage) {
+    if (!connection.meter.allows(budget, message.length)) {
       _reject(InputRejection.overBudget);
       _refuse(connection, GoodbyeReason.overBudget);
       return;
     }
+    connection.meter.count(message.length);
     final credentials = decodeJoin(message);
     if (credentials == null) return;
 
@@ -456,7 +463,8 @@ class NetHost {
   }
 
   /// Closes every client's tick, then disconnects the ones that stayed over
-  /// budget. Their session ends as removed, so a flooder cannot resume it.
+  /// budget. Their session ends as [GoneReason.overBudget], so a flooder
+  /// cannot resume it and the game can tell why.
   void _cutOffFloods() {
     for (final client in _clients.values) {
       client.meter.endTick();
@@ -465,16 +473,16 @@ class NetHost {
         .where((client) => client.meter.isOver(budget))
         .toList();
     for (final client in flooders) {
-      _kick(client, GoodbyeReason.overBudget);
+      _cutOff(client);
     }
   }
 
-  void _kick(_Client client, String reason) {
+  void _cutOff(_Client client) {
     _clients.remove(client.id);
     unawaited(client.subscription.cancel());
-    _turnAway(client.transport, reason);
+    _turnAway(client.transport, GoodbyeReason.overBudget);
     if (_sessionIndex.containsKey(client.id)) {
-      _end(client.id, GoneReason.removed);
+      _end(client.id, GoneReason.overBudget);
     } else {
       _releaseOwned(client.id);
     }

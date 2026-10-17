@@ -4,8 +4,7 @@ import 'package:orblit_core/orblit_core.dart';
 import 'package:orblit_net/orblit_net.dart';
 import 'package:test/test.dart';
 
-/// Lets the loopback link deliver everything queued.
-Future<void> settle() => Future<void>.delayed(Duration.zero);
+import 'support/loopback.dart';
 
 /// One side of a session: a world plus the components it replicates.
 class Peer {

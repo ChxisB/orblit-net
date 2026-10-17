@@ -41,7 +41,7 @@ void main() {
     expect(meter.allows(budget, 1), isTrue);
   });
 
-  test('strikes count ticks in a row and a clean tick clears them', () {
+  test('a refused tick adds a strike and a clean tick forgives one', () {
     final meter = BudgetMeter();
     meter
       ..refuse()
@@ -49,14 +49,26 @@ void main() {
     expect(meter.isOver(budget), isFalse);
 
     meter.endTick();
+    meter
+      ..refuse()
+      ..endTick();
     expect(meter.isOver(budget), isFalse);
 
     meter
       ..refuse()
-      ..endTick()
-      ..refuse()
       ..endTick();
     expect(meter.isOver(budget), isTrue);
+  });
+
+  test('forgiving a clean tick stops at zero', () {
+    final meter = BudgetMeter();
+    for (var i = 0; i < 5; i++) {
+      meter.endTick();
+    }
+    meter
+      ..refuse()
+      ..endTick();
+    expect(meter.isOver(budget), isFalse);
   });
 
   test('a limit under one is refused', () {

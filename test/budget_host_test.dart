@@ -6,10 +6,10 @@ import 'package:orblit_core/orblit_core.dart';
 import 'package:orblit_net/orblit_net.dart';
 import 'package:test/test.dart';
 
-Future<void> settle() => Future<void>.delayed(Duration.zero);
+import 'support/loopback.dart';
 
 /// A world with a position column the owner may write.
-class Side {
+final class Side {
   Side() {
     networkId = world.registerComponent('NetworkId', kind: ComponentKind.int64);
     position = world.registerComponent(
@@ -27,7 +27,7 @@ class Side {
 }
 
 /// One client: its own world, a loopback link, and what the host told it.
-class Player {
+final class Player {
   Player() : link = LoopbackLink() {
     client = NetClient(
       world: side.world,
@@ -105,7 +105,6 @@ void main() {
 
   setUp(() {
     authority = Side();
-    host = build();
   });
 
   tearDown(() async {
@@ -118,7 +117,6 @@ void main() {
   });
 
   test('a thousand messages in a tick let only the budget through', () async {
-    await host.dispose();
     host = build(budget: InboundBudget(messagesPerTick: 10));
     final ann = addPlayer('ann');
     ann.flood(1000);
@@ -129,7 +127,6 @@ void main() {
   });
 
   test('the budget starts again each tick', () async {
-    await host.dispose();
     host = build(budget: InboundBudget(messagesPerTick: 10));
     final ann = addPlayer('ann');
     ann.flood(15);
@@ -142,19 +139,20 @@ void main() {
     expect(host.acceptedInputs, 19);
   });
 
-  test('an oversized message is dropped before it is decoded', () async {
+  test('an input under bytesPerMessage is applied', () async {
+    host = build();
     final ann = addPlayer('ann');
-    final size = ann.move().length;
-
-    // The same input is applied under the default budget.
     ann.link.client.send(ann.move());
     await settle();
-    expect(host.acceptedInputs, 1);
 
-    await host.dispose();
-    host = build(budget: InboundBudget(bytesPerMessage: size - 1));
-    final bob = addPlayer('bob');
-    bob.link.client.send(bob.move());
+    expect(host.acceptedInputs, 1);
+  });
+
+  test('an input over bytesPerMessage is not applied', () async {
+    host = build(budget: InboundBudget(bytesPerMessage: 40));
+    final ann = addPlayer('ann');
+    expect(ann.move().length, greaterThan(40));
+    ann.link.client.send(ann.move());
     await settle();
 
     expect(host.acceptedInputs, 0);
@@ -162,18 +160,11 @@ void main() {
   });
 
   test('a burst shorter than strikes does not disconnect', () async {
-    await host.dispose();
     host = build(budget: InboundBudget(messagesPerTick: 5, strikes: 3));
     final ann = addPlayer('ann');
 
-    for (var round = 0; round < 2; round++) {
-      ann.flood(20);
-      await settle();
-      await publish(1);
-    }
-    await publish(1);
-    for (var round = 0; round < 2; round++) {
-      ann.flood(20);
+    for (final flooding in [true, true, false, false, true, true]) {
+      if (flooding) ann.flood(20);
       await settle();
       await publish(1);
     }
@@ -182,8 +173,21 @@ void main() {
     expect(ann.reasons, isEmpty);
   });
 
+  test('a flooder who pauses now and then is still cut off', () async {
+    host = build(budget: InboundBudget(messagesPerTick: 5, strikes: 3));
+    final ann = addPlayer('ann');
+
+    for (final flooding in [true, true, false, true, true]) {
+      if (flooding) ann.flood(20);
+      await settle();
+      await publish(1);
+    }
+
+    expect(ann.reasons, [GoodbyeReason.overBudget]);
+    expect(host.clientCount, 0);
+  });
+
   test('a sustained breach disconnects and frees what it owned', () async {
-    await host.dispose();
     host = build(budget: InboundBudget(messagesPerTick: 5, strikes: 3));
     final ann = addPlayer('ann');
     final bob = addPlayer('bob');
@@ -201,9 +205,8 @@ void main() {
     expect(bob.client.entityCount, 2);
   });
 
-  test('a flooding session ends as removed and cannot resume', () async {
+  test('a flooding session ends as overBudget and cannot resume', () async {
     final gone = <(String, GoneReason)>[];
-    await host.dispose();
     host = build(
       budget: InboundBudget(messagesPerTick: 5, strikes: 2),
       sessions: SessionPolicy(
@@ -226,31 +229,50 @@ void main() {
     }
 
     expect(ann.reasons, [GoodbyeReason.overBudget]);
-    expect(gone, [('ann', GoneReason.removed)]);
+    expect(gone, [('ann', GoneReason.overBudget)]);
     expect(host.sessionState('ann'), isNull);
   });
 
-  test('a join over bytesPerMessage is refused before it is decoded', () async {
-    final joined = <String>[];
-    await host.dispose();
-    host = build(
-      budget: InboundBudget(bytesPerMessage: 20),
-      sessions: SessionPolicy(
-        admit: (bytes) {
-          joined.add('asked');
-          return Admit(utf8.decode(bytes));
-        },
-      ),
-    );
-    final stranger = Player();
-    players.add(stranger);
-    addTearDown(stranger.link.close);
-    host.accept(stranger.link.host);
-    stranger.client.join(Uint8List(100));
-    await settle();
+  group('before the join', () {
+    late List<String> asked;
 
-    expect(stranger.reasons, [GoodbyeReason.overBudget]);
-    expect(joined, isEmpty);
-    expect(host.rejections[InputRejection.overBudget], 1);
+    Player connect(InboundBudget budget) {
+      asked = [];
+      host = build(
+        budget: budget,
+        sessions: SessionPolicy(
+          admit: (bytes) {
+            asked.add('asked');
+            return Admit(utf8.decode(bytes));
+          },
+        ),
+      );
+      final stranger = Player();
+      players.add(stranger);
+      addTearDown(stranger.link.close);
+      host.accept(stranger.link.host);
+      return stranger;
+    }
+
+    test('a join over bytesPerMessage never reaches admit', () async {
+      final stranger = connect(InboundBudget(bytesPerMessage: 20));
+      stranger.client.join(Uint8List(100));
+      await settle();
+
+      expect(stranger.reasons, [GoodbyeReason.overBudget]);
+      expect(asked, isEmpty);
+      expect(host.rejections[InputRejection.overBudget], 1);
+    });
+
+    test('a stream of junk is closed once it passes the budget', () async {
+      final stranger = connect(InboundBudget(messagesPerTick: 10));
+      for (var i = 0; i < 1000; i++) {
+        stranger.link.client.send(Uint8List(16));
+      }
+      await settle();
+
+      expect(stranger.reasons, [GoodbyeReason.overBudget]);
+      expect(host.rejections[InputRejection.overBudget], 1);
+    });
   });
 }
