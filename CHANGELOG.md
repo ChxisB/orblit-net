@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Add `ActiveCells`. It takes the cells clients stand in once a tick, as
+  `GridInterest.focusCells` gives them, and says which cells are within
+  `radius` of one. A cell stays active through `hold` after nothing is near
+  it. A game asks `isActive`, `isActiveAt` or `cells`, and decides what to
+  skip. The clock is a parameter.
+
 ## 0.6.0
 
 - Add `InterestRule` and `NetHost.interest`. With a rule, each client is

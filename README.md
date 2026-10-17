@@ -191,6 +191,35 @@ final host = NetHost(
 - With `--cell 50`, the load command tells each client only about its own
   cell. `--script scatter` spreads the clients over a map 1000 units across.
 
+## Active cells
+
+`ActiveCells` says which cells of the world are worth simulating, so a game
+can skip work where nobody is near. It skips nothing itself. A system asks
+and decides.
+
+```dart
+final grid = Grid(50);
+final interest = GridInterest(set: set, position: position, grid: grid);
+final active = ActiveCells(
+  grid: grid,
+  radius: 2,
+  hold: const Duration(seconds: 30),
+);
+
+// Once a tick, before the systems run.
+active.update(interest.focusCells);
+if (active.isActiveAt(x, z)) stepGuard(guard);
+```
+
+- A cell is active when it is within `radius` cells of a client's entity. It
+  stays active through `hold` after that stops being true, so a player who
+  steps back and forth over a border does not stop and start a region.
+- The answer is as of the last `update`, so every system in a tick sees the
+  same cells. `focusCells` is as of the last `publish`.
+- `cells` lists the active cells, and `isActive` takes a cell.
+- `clock` defaults to a monotonic clock. A test passes its own.
+- Use one `Grid` for both, so the cell size lives in one place.
+
 ## Licence
 
 MPL-2.0, © 2026 Chris Beckett. That is the Mozilla Public License, and it is
