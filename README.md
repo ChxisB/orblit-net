@@ -25,6 +25,22 @@ git clone https://github.com/ChxisB/orblit.git       # beside this one
   than jump. Floats blend, and integers take the earlier value.
 - **Transports.** A loopback link, so a single-player build runs the real
   networked path, and a socket transport for actual play.
+- **Timing.** A `TickClock` keeps the tick rate and reports drift. After each
+  `publish`, `host.summary()` says where the tick went, phase by phase, and
+  how many bytes each client was sent for each component.
+
+```dart
+final host = NetHost(
+  world: world,
+  set: set,
+  networkId: networkId,
+  clock: TickClock(period: const Duration(milliseconds: 50)),
+  onOverrun: (summary) => print(summary.tickMax),
+);
+host.phase('physics', stepPhysics);
+host.publish();
+print(host.summary().phases['encode']?.average);
+```
 
 ## Licence
 
