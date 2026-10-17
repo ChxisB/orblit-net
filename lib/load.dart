@@ -44,6 +44,7 @@ final class LoadOptions {
     required this.ticks,
     required this.script,
     this.period = const Duration(milliseconds: 50),
+    this.sockets = false,
     this.system,
   }) {
     if (clients < 1) throw ArgumentError.value(clients, 'clients', 'below 1');
@@ -58,6 +59,9 @@ final class LoadOptions {
   final LoadScript script;
   final Duration period;
 
+  /// Use WebSockets on localhost instead of loopback links.
+  final bool sockets;
+
   /// The game's own work for a tick. It runs inside `host.phase('system')`,
   /// so it shows in the summary beside the host's stages.
   final void Function(int tick)? system;
@@ -70,6 +74,8 @@ final class LoadReport {
     required this.period,
     required this.elapsed,
     required this.summary,
+    required this.accepted,
+    required this.rejected,
   });
 
   final int clients;
@@ -77,6 +83,11 @@ final class LoadReport {
   final Duration period;
   final Duration elapsed;
   final PhaseSummary summary;
+
+  /// Inputs the host applied, and inputs it refused. A run that refuses any
+  /// is mis-wired, and its figures are not a load.
+  final int accepted;
+  final int rejected;
 
   bool get overran => summary.tickAverage > period;
 
@@ -96,6 +107,7 @@ final class LoadReport {
       );
     _writePhases(out);
     _writeBytes(out);
+    out.writeln('inputs applied $accepted, refused $rejected');
     return out.toString();
   }
 
@@ -176,6 +188,30 @@ final class _Peer {
   }
 }
 
+/// Joins one client to [host] and returns the client's end. Every transport
+/// opened lands in [open], to be closed when the run ends.
+///
+/// Sockets connect one at a time, so the host's ids follow connection order.
+Future<Transport> _join(
+  NetHost host,
+  String id,
+  SocketServer? server,
+  List<Transport> open,
+) async {
+  if (server == null) {
+    final link = LoopbackLink();
+    open.addAll([link.host, link.client]);
+    host.addClient(id, link.host);
+    return link.client;
+  }
+  final arrived = server.connections.first;
+  final client = await SocketTransport.connect(server.url);
+  final accepted = await arrived;
+  open.addAll([accepted, client]);
+  host.addClient(id, accepted);
+  return client;
+}
+
 /// Runs [options.ticks] ticks of a host with [options.clients] scripted
 /// clients, one entity each, and reports where the time went.
 Future<LoadReport> runLoad(LoadOptions options) async {
@@ -187,17 +223,15 @@ Future<LoadReport> runLoad(LoadOptions options) async {
     networkId: schema.networkId,
     clock: clock,
   );
-  final links = <LoopbackLink>[];
+  final server = options.sockets ? await SocketServer.bind() : null;
+  final open = <Transport>[];
   final peers = <_Peer>[];
   try {
     for (var i = 0; i < options.clients; i++) {
-      final link = LoopbackLink();
-      links.add(link);
       final entity = schema.world.createEntity();
       final entityId = host.spawn(entity, owner: 'c$i');
       schema.world.add(entity, schema.position, Float32List(3));
-      host.addClient('c$i', link.host);
-      peers.add(_Peer(link.client, entityId));
+      peers.add(_Peer(await _join(host, 'c$i', server, open), entityId));
     }
 
     final watch = Stopwatch()..start();
@@ -219,15 +253,18 @@ Future<LoadReport> runLoad(LoadOptions options) async {
       period: options.period,
       elapsed: watch.elapsed,
       summary: host.summary(last: 300),
+      accepted: host.acceptedInputs,
+      rejected: host.rejections.values.fold(0, (sum, n) => sum + n),
     );
   } finally {
     await host.dispose();
     for (final peer in peers) {
       await peer.dispose();
     }
-    for (final link in links) {
-      await link.close();
+    for (final transport in open) {
+      await transport.close();
     }
+    await server?.close();
     schema.world.dispose();
   }
 }

@@ -8,12 +8,14 @@ LoadOptions options({
   int ticks = 10,
   Duration period = const Duration(milliseconds: 20),
   String script = 'walk',
+  bool sockets = false,
   void Function(int tick)? system,
 }) => LoadOptions(
   clients: clients,
   ticks: ticks,
   period: period,
   script: loadScripts[script]!,
+  sockets: sockets,
   system: system,
 );
 
@@ -30,6 +32,24 @@ void main() {
       }
     },
   );
+
+  test('inputs from every client are applied and none refused', () async {
+    final report = await runLoad(options());
+
+    expect(report.accepted, greaterThan(0));
+    expect(report.rejected, 0);
+  });
+
+  test('over real sockets every client is sent bytes and heard', () async {
+    final report = await runLoad(options(clients: 4, sockets: true));
+
+    expect(report.summary.bytesSent, hasLength(4));
+    for (final bytes in report.summary.bytesSent.values) {
+      expect(bytes.columns['Position'], greaterThan(0));
+    }
+    expect(report.accepted, greaterThan(0));
+    expect(report.rejected, 0);
+  });
 
   test('still sends less than walk', () async {
     final walk = await runLoad(options());

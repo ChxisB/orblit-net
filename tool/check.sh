@@ -19,7 +19,7 @@ else
   echo "  FAIL  tests"; tail -25 /tmp/orblit_net_test.log; failures=$((failures+1))
 fi
 
-if dart format --output=none --set-exit-if-changed lib test > /dev/null 2>&1; then
+if dart format --output=none --set-exit-if-changed lib test bin > /dev/null 2>&1; then
   echo "  ok    format"
 else
   echo "  FAIL  format"; failures=$((failures+1))
