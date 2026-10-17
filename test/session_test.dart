@@ -18,7 +18,7 @@ Admission admitByName(Uint8List bytes) {
 }
 
 /// A transport that records what the host did to it.
-class Probe implements Transport {
+final class Probe implements Transport {
   final StreamController<Uint8List> _heard = StreamController.broadcast();
   final List<String> goodbyes = [];
   var closed = false;
@@ -42,7 +42,7 @@ class Probe implements Transport {
 }
 
 /// A replicated world with a position column, and the same on a client.
-class Side {
+final class Side {
   Side() {
     networkId = world.registerComponent('NetworkId', kind: ComponentKind.int64);
     position = world.registerComponent(
@@ -62,7 +62,7 @@ class Side {
 }
 
 /// One connection: a loopback link and the client at its far end.
-class Connection {
+final class Connection {
   Connection(this.side) : link = LoopbackLink() {
     client = NetClient(
       world: side.world,
