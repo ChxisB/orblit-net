@@ -26,6 +26,47 @@ git clone https://github.com/ChxisB/orblit.git       # beside this one
 - **Transports.** A loopback link, so a single-player build runs the real
   networked path, and a socket transport for actual play.
 
+## Sessions
+
+A host with a `SessionPolicy` admits clients through your function and keeps
+their entities when a connection drops.
+
+```dart
+final host = NetHost(
+  world: world,
+  set: set,
+  networkId: networkId,
+  sessions: SessionPolicy(
+    admit: (credentials) => accounts.check(credentials), // Admit or Refuse
+    lingerTicks: 600,
+    onJoin: (key) => spawnPlayer(key),
+    onGone: (key, reason) => savePlayer(key),
+  ),
+);
+
+server.connections.listen(host.accept);
+client.join(credentials);
+```
+
+- `admit` gets the bytes the client sent and answers `Admit(key)` or
+  `Refuse(reason)`. A throw refuses the join. Orblit checks nothing about who
+  someone is. Use `wss` on the socket if the bytes must stay private.
+- A refused client gets the reason in `onGoodbye` and the connection closes.
+- The key is the client id, so `spawn(entity, owner: key)` ties an entity to
+  the player.
+- When a connection drops, the session lingers. Its entities stay and no
+  input arrives. `host.sessionState(key)` answers `live`, `lingering` or null.
+- A join with the same key during the linger resumes the session from a full
+  snapshot. `onJoin` does not run again.
+- A second join for a live key is refused with `alreadyLive`. With
+  `takeOver: true` the old connection hears `replaced` and the new one
+  resumes the session.
+- After `lingerTicks` ticks, `onGone(key, GoneReason.disconnect)` runs once.
+  The key still owns its entities during the call, so the game can save and
+  despawn them. Whatever is left then reverts to the authority.
+- `removeClient(key)` ends a session at once with `GoneReason.removed`.
+- `dispose` ends no session and calls no `onGone`. Save before it.
+
 ## Licence
 
 MPL-2.0, © 2026 Chris Beckett. That is the Mozilla Public License, and it is
