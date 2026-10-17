@@ -7,15 +7,17 @@ Usage: dart run orblit_net:load [options]
   --clients N    scripted clients (default 50)
   --seconds S    length of the run (default 10)
   --hz N         ticks per second (default 20)
-  --script NAME  still, walk or random (default walk)
+  --script NAME  still, walk, random or scatter (default walk)
   --sockets      WebSockets on localhost instead of loopback links
   --slow-ms N    a system that takes N ms each tick (default 0)
+  --cell N       tell each client only about entities within one cell of
+                 its own, cells N units across (default: tell everyone)
   --help         this text
 
 The tick is judged over the last 300 ticks. Exits 1 when the host's average
 tick is longer than the period, and 2 when the host refused any input.''';
 
-const _valueFlags = {'clients', 'seconds', 'hz', 'script', 'slow-ms'};
+const _valueFlags = {'clients', 'seconds', 'hz', 'script', 'slow-ms', 'cell'};
 
 /// Reads `--name value` and `--name=value`. A bare `--sockets` is a switch.
 Map<String, String> _flags(List<String> args) {
@@ -72,6 +74,9 @@ int _number(
     period: Duration(microseconds: Duration.microsecondsPerSecond ~/ hz),
     sockets: flags.containsKey('sockets'),
     system: slow > 0 ? (_) => sleep(Duration(milliseconds: slow)) : null,
+    cellSize: flags.containsKey('cell')
+        ? _number(flags, 'cell', 1).toDouble()
+        : null,
   );
   return (options: options, script: script);
 }

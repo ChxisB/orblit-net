@@ -10,6 +10,7 @@ LoadOptions options({
   String script = 'walk',
   bool sockets = false,
   void Function(int tick)? system,
+  double? cellSize,
 }) => LoadOptions(
   clients: clients,
   ticks: ticks,
@@ -17,6 +18,7 @@ LoadOptions options({
   script: loadScripts[script]!,
   sockets: sockets,
   system: system,
+  cellSize: cellSize,
 );
 
 void main() {
@@ -59,6 +61,18 @@ void main() {
     int total(LoadReport report) =>
         report.summary.bytesSent.values.fold(0, (sum, b) => sum + b.total);
     expect(total(still), lessThan(total(walk)));
+  });
+
+  test('scattered clients are sent less when each sees its own cell', () async {
+    final everyone = await runLoad(options(clients: 40, script: 'scatter'));
+    final nearby = await runLoad(
+      options(clients: 40, script: 'scatter', cellSize: 50),
+    );
+
+    int total(LoadReport report) =>
+        report.summary.bytesSent.values.fold(0, (sum, b) => sum + b.total);
+    expect(total(nearby), lessThan(total(everyone) ~/ 2));
+    expect(nearby.rejected, 0);
   });
 
   test('a slow system is the phase with the largest average', () async {

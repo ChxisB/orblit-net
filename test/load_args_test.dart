@@ -37,6 +37,12 @@ void main() {
     expect(run.options.system, isNotNull);
   });
 
+  test('a cell size turns interest on and none leaves it off', () {
+    expect(parseLoadArgs([]).options.cellSize, isNull);
+    expect(parseLoadArgs(['--cell', '25']).options.cellSize, 25);
+    expect(() => parseLoadArgs(['--cell', '0']), throwsFormatException);
+  });
+
   test('a slow system of zero is none', () {
     expect(parseLoadArgs(['--slow-ms', '0']).options.system, isNull);
   });

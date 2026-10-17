@@ -25,10 +25,21 @@ Float32List? _random(int client, int tick) {
   ]);
 }
 
+// A place fixed by the client, 1000 units across, with a slow drift along x.
+Float32List? _scatter(int client, int tick) {
+  final random = Random(client);
+  return Float32List.fromList([
+    random.nextDouble() * 1000 + tick * 0.1,
+    0,
+    random.nextDouble() * 1000,
+  ]);
+}
+
 const loadScripts = <String, LoadScript>{
   'still': _still,
   'walk': _walk,
   'random': _random,
+  'scatter': _scatter,
 };
 
 final class LoadOptions {
@@ -39,11 +50,16 @@ final class LoadOptions {
     this.period = const Duration(milliseconds: 50),
     this.sockets = false,
     this.system,
+    this.cellSize,
   }) {
     if (clients < 1) throw ArgumentError.value(clients, 'clients', 'below 1');
     if (ticks < 1) throw ArgumentError.value(ticks, 'ticks', 'below 1');
     if (period <= Duration.zero) {
       throw ArgumentError.value(period, 'period', 'not positive');
+    }
+    final cell = cellSize;
+    if (cell != null && !(cell > 0)) {
+      throw ArgumentError.value(cell, 'cellSize', 'not positive');
     }
   }
 
@@ -59,6 +75,10 @@ final class LoadOptions {
   /// inside `host.phase('system')`, so it shows in the summary beside the
   /// host's stages.
   final void Function(int tick)? system;
+
+  /// Tells each client only about the entities within one cell of its own,
+  /// with cells this many units across. Null tells every client everything.
+  final double? cellSize;
 }
 
 final class LoadReport {
@@ -229,11 +249,19 @@ final class _Run {
   _Run(this.options, this._server)
     : _clock = TickClock(period: options.period),
       _pair = _server == null ? _loopbackPair : (() => _socketPair(_server)) {
+    final cellSize = options.cellSize;
     host = NetHost(
       world: _schema.world,
       set: _schema.set,
       networkId: _schema.networkId,
       clock: _clock,
+      interest: cellSize == null
+          ? null
+          : GridInterest(
+              set: _schema.set,
+              position: _schema.position,
+              grid: Grid(cellSize),
+            ),
     );
   }
 
