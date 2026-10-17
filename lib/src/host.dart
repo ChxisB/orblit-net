@@ -6,8 +6,10 @@ import 'package:orblit_core/orblit_core.dart';
 import 'ack.dart';
 import 'codec.dart';
 import 'input.dart';
+import 'phase_times.dart';
 import 'replication.dart';
 import 'snapshot.dart';
+import 'tick_clock.dart';
 import 'transport.dart';
 
 /// One connected peer, from the authority's side.
@@ -53,9 +55,12 @@ class NetHost {
     required ComponentType networkId,
     ComponentType? ownerComponent,
     this.historyDepth = 64,
+    TickClock? clock,
+    void Function(PhaseSummary summary)? onOverrun,
   }) : _world = world,
        _networkId = networkId,
        _ownerComponent = ownerComponent,
+       _times = PhaseTimes(clock: clock, onOverrun: onOverrun),
        _capture = SnapshotCapture(
          world: world,
          set: set,
@@ -78,6 +83,7 @@ class NetHost {
 
   final SnapshotCapture _capture;
   final SnapshotCodec _codec = const SnapshotCodec();
+  final PhaseTimes _times;
 
   /// How many past snapshots to keep for building deltas. A client further
   /// behind than this is sent a full snapshot instead.
@@ -107,6 +113,14 @@ class NetHost {
   /// probing, and both are things an operator wants to see.
   int get acceptedInputs => _acceptedInputs;
   Map<InputRejection, int> get rejections => Map.unmodifiable(_rejections);
+
+  /// Runs [body] as a named part of the current tick and times it, so a
+  /// game's own systems show up in [summary] beside the host's stages.
+  // F5: it returns what [body] returns so a stage can wrap an expression.
+  T phase<T>(String name, T Function() body) => _times.phase(name, body);
+
+  /// Where the last [last] ticks went, and what each client was sent.
+  PhaseSummary summary({int last = 30}) => _times.summary(last: last);
 
   /// Marks [entity] as replicated and gives it a wire identity.
   int spawn(int entity, {String? owner}) {
@@ -160,6 +174,7 @@ class NetHost {
   Future<void> removeClient(String id) async {
     final client = _clients.remove(id);
     if (client == null) return;
+    _times.forgetClient(id);
     await client.subscription.cancel();
     // Entities the departed client owned revert to the authority rather than
     // staying writable by a name that could be reconnected under.
@@ -233,18 +248,45 @@ class NetHost {
   /// the diff is per client, and that is a comparison rather than a re-read.
   void publish() {
     _tick++;
-    final current = _capture.capture(_tick);
+    try {
+      final current = _times.phase('capture', () => _capture.capture(_tick));
 
-    for (final client in _clients.values) {
-      final baseline = _history[client.acknowledgedTick];
-      final message = baseline == null
-          ? _codec.encodeFull(current)
-          : _codec.encodeDelta(current, baseline);
-      client.transport.send(message);
+      // Per-client stages add up across clients within a tick.
+      for (final client in _clients.values) {
+        final baseline = _history[client.acknowledgedTick];
+        final message = _times.phase(
+          'encode',
+          () => baseline == null
+              ? _codec.encodeFull(current)
+              : _codec.encodeDelta(current, baseline),
+        );
+        _times.phase('send', () => client.transport.send(message));
+        _times.phase('count', () => _countSent(client.id, message));
+      }
+
+      _times.phase('history', () {
+        _remember(current);
+        _forgetDeadEntities(current);
+      });
+    } finally {
+      // A tick that throws still closes, so the next one is not merged into it.
+      _times.finish();
     }
+  }
 
-    _remember(current);
-    _forgetDeadEntities(current);
+  /// Splits what one message cost by component column. Whatever is not a
+  /// component's bytes is overhead.
+  void _countSent(String clientId, Uint8List message) {
+    var columns = 0;
+    for (final group in _codec.groupHeaders(message)) {
+      for (final bit in set.bitsOf(group.mask)) {
+        final type = set.atBit(bit).type;
+        final bytes = group.rows * type.byteSize;
+        _times.countSent(clientId, type.name, bytes);
+        columns += bytes;
+      }
+    }
+    _times.countSent(clientId, null, message.length - columns);
   }
 
   void _forgetDeadEntities(WorldSnapshot current) {
