@@ -4,10 +4,13 @@ import 'dart:typed_data';
 import 'package:orblit_core/orblit_core.dart';
 
 import 'ack.dart';
+import 'budget.dart';
 import 'codec.dart';
 import 'input.dart';
 import 'phase_times.dart';
 import 'replication.dart';
+import 'session.dart';
+import 'session_message.dart';
 import 'snapshot.dart';
 import 'tick_clock.dart';
 import 'transport.dart';
@@ -29,9 +32,32 @@ class _Client {
   /// so a client that falls silent gets larger messages rather than a world
   /// that drifts.
   int acknowledgedTick = 0;
+
+  /// What this client has sent since the last tick.
+  final BudgetMeter meter = BudgetMeter();
 }
 
-/// Why an input was not applied. Counted rather than thrown: a hostile client
+/// A connection from [NetHost.accept]. It becomes a client once it is
+/// admitted.
+final class _Connection {
+  _Connection(this.transport, this.acceptedAt);
+
+  final Transport transport;
+
+  /// The host tick when it arrived, for the deadline to send a join.
+  final int acceptedAt;
+
+  late final StreamSubscription<Uint8List> subscription;
+
+  /// Counts everything sent before the join. It is never reset, so a
+  /// connection that has not joined has one tick's budget in total.
+  final BudgetMeter meter = BudgetMeter();
+
+  /// Set when the connection is admitted.
+  _Client? client;
+}
+
+/// Why an input, or a whole message, was not applied. Counted rather than thrown: a hostile client
 /// should not be able to raise exceptions on the authority.
 enum InputRejection {
   /// No entity with that network id.
@@ -45,6 +71,11 @@ enum InputRejection {
 
   /// The payload did not match the components it claimed to carry.
   malformed,
+
+  /// A whole message dropped unread because the client sent too much. The
+  /// other reasons count entries inside an input. This one counts messages,
+  /// whatever they carried.
+  overBudget,
 }
 
 /// The authority: it owns the world and tells clients what happened.
@@ -57,7 +88,10 @@ class NetHost {
     this.historyDepth = 64,
     TickClock? clock,
     void Function(PhaseSummary summary)? onOverrun,
-  }) : _world = world,
+    this.sessions,
+    InboundBudget? budget,
+  }) : budget = budget ?? InboundBudget(),
+       _world = world,
        _networkId = networkId,
        _ownerComponent = ownerComponent,
        _times = PhaseTimes(clock: clock, onOverrun: onOverrun),
@@ -89,9 +123,25 @@ class NetHost {
   /// behind than this is sent a full snapshot instead.
   final int historyDepth;
 
+  /// How clients are admitted, kept across a drop and ended. Null for a host
+  /// whose game adds clients itself with [addClient].
+  final SessionPolicy? sessions;
+
+  /// What each client may send between two ticks. One that stays over it is
+  /// cut off.
+  final InboundBudget budget;
+
   late final int _ownerWritableMask;
 
   final Map<String, _Client> _clients = {};
+
+  /// The client index of every live or lingering session, by key.
+  final Map<String, int> _sessionIndex = {};
+
+  /// The tick each lingering session lost its connection, by key.
+  final Map<String, int> _lingeringSince = {};
+
+  final Set<_Connection> _unjoined = {};
   final Map<int, WorldSnapshot> _history = {};
   final List<int> _historyOrder = [];
   final Map<int, int> _entityByNetworkId = {};
@@ -145,12 +195,20 @@ class NetHost {
     if (entity == null || component == null) return;
     if (!_world.isAlive(entity) || !_world.has(entity, component)) return;
 
-    final index = clientId == null ? 0 : (_clients[clientId]?.index ?? 0);
+    final index = clientId == null
+        ? 0
+        : (_sessionIndex[clientId] ?? _clients[clientId]?.index ?? 0);
     final bytes = _world.bytesOf(entity, component)!;
     ByteData.sublistView(bytes).setUint32(0, index, Endian.little);
   }
 
   String? ownerOf(int networkId) => _ownerByNetworkId[networkId];
+
+  /// Whether [key] is attached, lingering, or not known to this host.
+  SessionState? sessionState(String key) {
+    if (_lingeringSince.containsKey(key)) return SessionState.lingering;
+    return _sessionIndex.containsKey(key) ? SessionState.live : null;
+  }
 
   /// The authority's own entity for a network id, if it still exists.
   int? entityFor(int networkId) => _entityByNetworkId[networkId];
@@ -160,7 +218,7 @@ class NetHost {
   void despawn(int entity) => _world.destroyEntity(entity);
 
   void addClient(String id, Transport transport) {
-    if (_clients.containsKey(id)) {
+    if (_clients.containsKey(id) || _sessionIndex.containsKey(id)) {
       throw StateError('A client is already connected as "$id".');
     }
     late final _Client client;
@@ -173,11 +231,159 @@ class NetHost {
 
   Future<void> removeClient(String id) async {
     final client = _clients.remove(id);
-    if (client == null) return;
+    await client?.subscription.cancel();
+    if (_sessionIndex.containsKey(id)) {
+      if (client != null) _turnAway(client.transport, GoodbyeReason.removed);
+      _end(id, GoneReason.removed);
+    } else if (client != null) {
+      _releaseOwned(id);
+    }
+  }
+
+  /// Takes a new connection, which must say who it is before anything else
+  /// counts. Needs [sessions].
+  ///
+  /// The join goes to the policy's `admit`. A refused connection hears why and
+  /// is closed, and leaves no session behind. So does one that sends no join
+  /// within `joinTicks`. A drop after admission makes the session linger
+  /// rather than ending it.
+  void accept(Transport transport) {
+    final policy = sessions;
+    if (policy == null) {
+      throw StateError('Accepting connections needs a SessionPolicy.');
+    }
+
+    final connection = _Connection(transport, _tick);
+    connection.subscription = transport.inbound.listen(
+      (message) => _hear(policy, connection, message),
+      onDone: () => _lost(connection),
+      onError: (Object _) => _lost(connection),
+    );
+    _unjoined.add(connection);
+  }
+
+  void _hear(SessionPolicy policy, _Connection connection, Uint8List message) {
+    final client = connection.client;
+    if (client != null) {
+      _receive(client, message);
+      return;
+    }
+    if (!connection.meter.allows(budget, message.length)) {
+      _reject(InputRejection.overBudget);
+      _refuse(connection, GoodbyeReason.overBudget);
+      return;
+    }
+    connection.meter.count(message.length);
+    final credentials = decodeJoin(message);
+    if (credentials == null) return;
+
+    switch (_verdict(policy, credentials)) {
+      case Refuse(:final reason):
+        _refuse(connection, reason);
+      case Admit(:final key):
+        _seat(policy, key, connection);
+    }
+  }
+
+  Admission _verdict(SessionPolicy policy, Uint8List credentials) {
+    try {
+      return policy.admit(credentials);
+    } catch (_) {
+      // The bytes come from a client. Whatever the game's parser throws on
+      // them is a refusal, not a crash.
+      return const Refuse(GoodbyeReason.refused);
+    }
+  }
+
+  /// Attaches a connection to [key]'s session, starting one if there is none.
+  void _seat(SessionPolicy policy, String key, _Connection connection) {
+    final attached = _clients[key];
+    if (attached != null) {
+      // A client the game added itself has no session to take over.
+      if (!policy.takeOver || !_sessionIndex.containsKey(key)) {
+        _refuse(connection, GoodbyeReason.alreadyLive);
+        return;
+      }
+      _turnAway(attached.transport, GoodbyeReason.replaced);
+      _drop(attached);
+    }
+
+    final resumed = _sessionIndex.containsKey(key);
+    final index = _sessionIndex[key] ?? _nextClientIndex++;
+    final client = _Client(
+      key,
+      index,
+      connection.transport,
+      connection.subscription,
+    );
+    connection.client = client;
+    _unjoined.remove(connection);
+    _clients[key] = client;
+    _sessionIndex[key] = index;
+    _lingeringSince.remove(key);
+    // After the client is attached, so a throw here leaves a session that a
+    // drop can still move to lingering.
+    if (!resumed) policy.onJoin?.call(key);
+  }
+
+  void _refuse(_Connection connection, String reason) {
+    _unjoined.remove(connection);
+    unawaited(connection.subscription.cancel());
+    _turnAway(connection.transport, reason);
+  }
+
+  void _turnAway(Transport transport, String reason) {
+    transport.send(encodeGoodbye(reason));
+    unawaited(transport.close());
+  }
+
+  /// A connection ended or failed. Its session, if it has one, lingers.
+  void _lost(_Connection connection) {
+    _unjoined.remove(connection);
+    final client = connection.client;
+    if (client != null) _drop(client);
+    unawaited(connection.transport.close());
+  }
+
+  /// Detaches a client's connection and lets its session linger.
+  void _drop(_Client client) {
+    _clients.remove(client.id);
+    unawaited(client.subscription.cancel());
+    _lingeringSince[client.id] = _tick;
+  }
+
+  void _expire() {
+    final policy = sessions;
+    if (policy == null) return;
+    for (final connection in _unjoined.toList()) {
+      if (_tick - connection.acceptedAt >= policy.joinTicks) {
+        _refuse(connection, GoodbyeReason.joinTimeout);
+      }
+    }
+    for (final entry in _lingeringSince.entries.toList()) {
+      if (_tick - entry.value >= policy.lingerTicks) {
+        _end(entry.key, GoneReason.disconnect);
+      }
+    }
+  }
+
+  /// Ends a session. The game is told first, while the key still owns what it
+  /// owned, and whatever is left afterwards reverts to the authority.
+  void _end(String key, GoneReason reason) {
+    _sessionIndex.remove(key);
+    _lingeringSince.remove(key);
+    try {
+      sessions?.onGone?.call(key, reason);
+    } finally {
+      _releaseOwned(key);
+    }
+  }
+
+  /// Entities a departed client owned revert to the authority rather than
+  /// staying writable by a name that could be reconnected under. The bytes
+  /// counted as sent to it are dropped with it.
+  void _releaseOwned(String id) {
     _times.forgetClient(id);
-    await client.subscription.cancel();
-    // Entities the departed client owned revert to the authority rather than
-    // staying writable by a name that could be reconnected under.
     for (final networkId
         in _ownerByNetworkId.entries
             .where((entry) => entry.value == id)
@@ -188,6 +394,14 @@ class NetHost {
   }
 
   void _receive(_Client client, Uint8List message) {
+    // Before any decoding, so a flood costs a length check and no more.
+    if (!client.meter.allows(budget, message.length)) {
+      client.meter.refuse();
+      _reject(InputRejection.overBudget);
+      return;
+    }
+    client.meter.count(message.length);
+
     final acknowledged = decodeAck(message);
     if (acknowledged != null) {
       if (acknowledged > client.acknowledgedTick) {
@@ -249,6 +463,10 @@ class NetHost {
   void publish() {
     _tick++;
     try {
+      _times.phase('sessions', () {
+        _cutOffFloods();
+        _expire();
+      });
       final current = _times.phase('capture', () => _capture.capture(_tick));
 
       // Per-client stages add up across clients within a tick.
@@ -289,6 +507,32 @@ class NetHost {
     _times.countSent(clientId, null, message.length - columns);
   }
 
+  /// Closes every client's tick, then disconnects the ones that stayed over
+  /// budget. Their session ends as [GoneReason.overBudget], so a flooder
+  /// cannot resume it and the game can tell why.
+  void _cutOffFloods() {
+    for (final client in _clients.values) {
+      client.meter.endTick();
+    }
+    final flooders = _clients.values
+        .where((client) => client.meter.isOver(budget))
+        .toList();
+    for (final client in flooders) {
+      _cutOff(client);
+    }
+  }
+
+  void _cutOff(_Client client) {
+    _clients.remove(client.id);
+    unawaited(client.subscription.cancel());
+    _turnAway(client.transport, GoodbyeReason.overBudget);
+    if (_sessionIndex.containsKey(client.id)) {
+      _end(client.id, GoneReason.overBudget);
+    } else {
+      _releaseOwned(client.id);
+    }
+  }
+
   void _forgetDeadEntities(WorldSnapshot current) {
     if (_entityByNetworkId.length == current.entityCount) return;
     for (final networkId in _entityByNetworkId.keys.toList()) {
@@ -308,10 +552,17 @@ class NetHost {
   }
 
   Future<void> dispose() async {
-    for (final client in _clients.values) {
+    // Copies, because a connection that closes while this awaits is dropped.
+    for (final client in _clients.values.toList()) {
       await client.subscription.cancel();
     }
+    for (final connection in _unjoined.toList()) {
+      await connection.subscription.cancel();
+    }
     _clients.clear();
+    _sessionIndex.clear();
+    _lingeringSince.clear();
+    _unjoined.clear();
     _capture.dispose();
   }
 }

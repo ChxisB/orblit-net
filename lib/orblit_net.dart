@@ -12,6 +12,7 @@
 library;
 
 export 'src/ack.dart' show decodeAck, encodeAck;
+export 'src/budget.dart' show InboundBudget;
 export 'src/client.dart' show NetClient;
 export 'src/codec.dart'
     show DecodedSnapshot, SnapshotCodec, SnapshotFormatError;
@@ -19,6 +20,15 @@ export 'src/host.dart' show InputRejection, NetHost;
 export 'src/input.dart' show InputEntry, InputMessage, decodeInput, encodeInput;
 export 'src/phase_times.dart' show ClientBytes, PhaseStats, PhaseSummary;
 export 'src/replication.dart' show ReplicatedComponent, ReplicationSet;
+export 'src/session.dart'
+    show
+        Admission,
+        Admit,
+        GoneReason,
+        GoodbyeReason,
+        Refuse,
+        SessionPolicy,
+        SessionState;
 export 'src/snapshot.dart'
     show SnapshotCapture, SnapshotGroup, SnapshotRow, WorldSnapshot;
 export 'src/socket_transport.dart' show SocketServer, SocketTransport;
