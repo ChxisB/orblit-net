@@ -6,6 +6,17 @@ import 'package:test/test.dart';
 
 Future<void> settle() => Future<void>.delayed(Duration.zero);
 
+class _BrokenTransport implements Transport {
+  @override
+  Stream<Uint8List> get inbound => const Stream.empty();
+
+  @override
+  void send(Uint8List message) => throw StateError('link is down');
+
+  @override
+  Future<void> close() async {}
+}
+
 void main() {
   late World world;
   late ComponentType networkId;
@@ -138,6 +149,16 @@ void main() {
       overruns.single.phases['physics']!.max,
       const Duration(milliseconds: 60),
     );
+  });
+
+  test('a publish that throws still closes its tick', () {
+    host.addClient('broken', _BrokenTransport());
+    expect(host.publish, throwsStateError);
+    expect(host.summary().ticks, 1);
+
+    now += period;
+    expect(host.publish, throwsStateError);
+    expect(host.summary().ticks, 2);
   });
 
   test('a client that leaves is forgotten', () async {
