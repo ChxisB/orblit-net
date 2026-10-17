@@ -233,6 +233,31 @@ void main() {
     expect(host.sessionState('ann'), isNull);
   });
 
+  test('the bytes counted for a session go when the session ends', () async {
+    host = build(
+      sessions: SessionPolicy(
+        admit: (bytes) => Admit(utf8.decode(bytes)),
+        lingerTicks: 1,
+      ),
+    );
+    final ann = Player();
+    players.add(ann);
+    addTearDown(ann.link.close);
+    host.accept(ann.link.host);
+    ann.client.join(Uint8List.fromList(utf8.encode('ann')));
+    await settle();
+    spawnFor('ann');
+
+    await publish(1);
+    expect(host.summary().bytesSent, contains('ann'));
+
+    await ann.link.close();
+    await settle();
+    await publish(2);
+    expect(host.sessionState('ann'), isNull);
+    expect(host.summary().bytesSent, isNot(contains('ann')));
+  });
+
   group('before the join', () {
     late List<String> asked;
 
