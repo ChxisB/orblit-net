@@ -7,6 +7,9 @@ const int _joinMagic = 0x4F52424A;
 /// 'ORBG'.
 const int _goodbyeMagic = 0x4F524247;
 
+/// 'ORBM'.
+const int _messageMagic = 0x4F52424D;
+
 const int _headerSize = 4;
 
 /// A client telling the authority who it is.
@@ -17,6 +20,14 @@ Uint8List encodeJoin(Uint8List credentials) => _tagged(_joinMagic, credentials);
 
 /// The credentials in a join, or null if this is not one.
 Uint8List? decodeJoin(Uint8List message) => _untagged(_joinMagic, message);
+
+/// A message of the game's own, in either direction. The engine carries the
+/// bytes and reads nothing from them.
+Uint8List encodeMessage(Uint8List body) => _tagged(_messageMagic, body);
+
+/// The body of a game message, or null if this is not one.
+Uint8List? decodeMessage(Uint8List message) =>
+    _untagged(_messageMagic, message);
 
 /// The authority telling a client why it is being sent away.
 Uint8List encodeGoodbye(String reason) =>

@@ -220,6 +220,38 @@ if (active.isActiveAt(x, z)) stepGuard(guard);
 - `clock` defaults to a monotonic clock. A test passes its own.
 - Use one `Grid` for both, so the cell size lives in one place.
 
+## Game messages
+
+A game can send its own bytes in either direction, beside the replicated
+columns. Chat, a login result and an inventory change are not world state, so
+they go this way.
+
+```dart
+final host = NetHost(
+  world: world,
+  set: set,
+  networkId: networkId,
+  onMessage: (clientId, body) => handle(clientId, body),
+);
+host.sendMessage('ana', encodeNotice('Welcome'));
+
+final client = NetClient(
+  // ...
+  onMessage: (body) => show(decodeNotice(body)),
+);
+client.sendMessage(encodeChat('hello'));
+```
+
+- The engine carries the bytes and reads nothing from them. The game decides
+  what a body means.
+- A message from a client counts against its `InboundBudget` before it is
+  passed on. A message over a limit is dropped and counted.
+- The bytes come from a client, so `onMessage` must not throw on them.
+- `sendMessage` to a client that is not attached, or is lingering, sends
+  nothing.
+- A message is as reliable as the transport. Both transports that ship keep
+  order and lose nothing. A transport that can lose messages loses these too.
+
 ## Licence
 
 MPL-2.0, © 2026 Chris Beckett. That is the Mozilla Public License, and it is

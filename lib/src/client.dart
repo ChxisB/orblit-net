@@ -49,6 +49,7 @@ class NetClient {
     this.onSpawn,
     this.onDespawn,
     this.onGoodbye,
+    this.onMessage,
     double Function()? clock,
   }) : _world = world,
        _networkId = networkId,
@@ -88,6 +89,9 @@ class NetClient {
 
   /// Called with the reason when the authority sends this client away.
   final void Function(String reason)? onGoodbye;
+
+  /// Called with the body of each game message the authority sends.
+  final void Function(Uint8List body)? onMessage;
 
   late final StreamSubscription<Uint8List> _subscription;
   final double Function() _now;
@@ -154,10 +158,19 @@ class NetClient {
     );
   }
 
+  /// Sends [body] to the authority as a game message. Its budget applies.
+  void sendMessage(Uint8List body) => _transport.send(encodeMessage(body));
+
   void _receive(Uint8List message) {
     final goodbye = decodeGoodbye(message);
     if (goodbye != null) {
       onGoodbye?.call(goodbye);
+      return;
+    }
+
+    final body = decodeMessage(message);
+    if (body != null) {
+      onMessage?.call(body);
       return;
     }
 

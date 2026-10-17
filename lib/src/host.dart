@@ -124,6 +124,7 @@ class NetHost {
     this.sessions,
     InboundBudget? budget,
     this.interest,
+    this.onMessage,
   }) : budget = budget ?? InboundBudget(),
        _world = world,
        _networkId = networkId,
@@ -169,6 +170,11 @@ class NetHost {
   /// every entity.
   final InterestRule? interest;
 
+  /// Called with each game message an attached client sends, after the
+  /// budget. The bytes come from a client, so the handler must not throw on
+  /// them. Null drops them.
+  final void Function(String clientId, Uint8List body)? onMessage;
+
   late final int _ownerWritableMask;
 
   final Map<String, _Client> _clients = {};
@@ -207,6 +213,13 @@ class NetHost {
 
   /// Where the last [last] ticks went, and what each client was sent.
   PhaseSummary summary({int last = 30}) => _times.summary(last: last);
+
+  /// Sends [body] to [clientId] as a game message. A client that is not
+  /// attached, or is lingering, is not sent it. Messages are as reliable as the
+  /// transport, which is the only thing that promises delivery or order.
+  void sendMessage(String clientId, Uint8List body) {
+    _clients[clientId]?.transport.send(encodeMessage(body));
+  }
 
   /// Marks [entity] as replicated and gives it a wire identity.
   int spawn(int entity, {String? owner}) {
@@ -445,7 +458,13 @@ class NetHost {
     }
 
     final input = decodeInput(message);
-    if (input != null) _applyInput(client, input);
+    if (input != null) {
+      _applyInput(client, input);
+      return;
+    }
+
+    final body = decodeMessage(message);
+    if (body != null) onMessage?.call(client.id, body);
   }
 
   /// Applies what a client asked for, to the extent it is allowed to.

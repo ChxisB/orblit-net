@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.0
+
+- Add game messages. `NetClient.sendMessage` and `NetHost.sendMessage` carry
+  bytes the game defines. `NetHost.onMessage` and `NetClient.onMessage`
+  receive them. A message from a client counts against its `InboundBudget`.
+
 ## 0.7.0
 
 - Add `ActiveCells`. It takes the cells clients stand in once a tick, as
