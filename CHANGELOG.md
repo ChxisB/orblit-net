@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0
+
+- Add a browser `SocketTransport`. `SocketTransport.connect` works in a
+  browser, over its own WebSocket. A conditional export picks the browser
+  version or the `dart:io` one. `SocketServer` is not exported to the web,
+  so code that names it does not compile there.
+- Add `package:orblit_net/transport.dart`, the part of the package a
+  browser can compile: `Transport`, `LoopbackLink`, `SocketTransport` and,
+  off the web, `SocketServer`. `orblit_net.dart` exports the same names.
+- The `dart:io` transport moved to `socket_transport_io.dart` and the server
+  to `socket_server.dart`. The public names are the same.
+- The main library still needs the engine's native core, which has no web
+  build. A browser can use the transport but not a `NetClient` yet.
+
 ## 0.9.0
 
 - Let `SessionPolicy.admit` answer with a future. The host keeps ticking

@@ -16,6 +16,8 @@ the longer version of this.
 ./tool/check.sh
 ```
 
+`check.sh` runs the transport test in Chrome, so Chrome must be installed.
+
 ## Licence
 
 This repository is under MPL-2.0. Opening a pull request means you are
