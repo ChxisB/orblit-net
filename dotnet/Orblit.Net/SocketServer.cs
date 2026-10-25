@@ -75,9 +75,11 @@ public sealed class SocketServer : IAsyncDisposable
                 _ = Serve(await _listener.AcceptTcpClientAsync(_stop.Token));
             }
         }
-        catch (Exception error) when (error is SocketException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception error) when (_stop.IsCancellationRequested || error is SocketException or ObjectDisposedException)
         {
-            // The listener was stopped.
+            // The listener was stopped. Accepting on a stopped listener throws InvalidOperationException
+            // even with a cancelled token, which a loop between two accepts meets, so a stop is
+            // judged by the token and not by the exception type.
         }
     }
 

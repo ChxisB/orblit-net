@@ -71,9 +71,9 @@ internal sealed class EchoServer : IAsyncDisposable
                 keep(await listener.AcceptTcpClientAsync(_stop.Token));
             }
         }
-        catch (Exception error) when (error is SocketException or OperationCanceledException or ObjectDisposedException)
+        catch (Exception error) when (_stop.IsCancellationRequested || error is SocketException or ObjectDisposedException)
         {
-            // Stopped.
+            // Stopped. See SocketServer for why the token decides.
         }
     }
 
