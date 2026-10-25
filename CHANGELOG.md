@@ -13,6 +13,23 @@
   to `socket_server.dart`. The public names are the same.
 - The main library still needs the engine's native core, which has no web
   build. A browser can use the transport but not a `NetClient` yet.
+- Add a C# port in `dotnet/`, `Orblit.Net` 0.10.0, with the same wire
+  format. A Dart host and a C# client join over a socket and end with the
+  same world, and so do a C# host and a Dart client. The browser
+  transport is not ported. These differ from the Dart package:
+  - Messages reach a handler on a pool thread, one at a time per link.
+    Dart used its one event loop.
+  - `LoopbackLink` has `IdleAsync`, which waits for queued messages. A
+    handler that throws comes out of the next `IdleAsync`.
+  - `SnapshotFormatError` is `SnapshotFormatException`.
+  - `SocketTransport` starts reading at the first `Listen`. A message over
+    16 MiB ends the link. A listener that throws goes to `onError` and
+    ends the link.
+  - A cell gap of `long.MinValue` is far in `GridInterest`. Dart's `abs`
+    left it negative, so it counted as near.
+  - The load harness adds a `machine` line and a p95 tick time to its
+    report. The `random` script uses `System.Random`, so its inputs are not
+    Dart's. `--seconds` times `--hz` over `int.MaxValue` is refused.
 
 ## 0.9.0
 
