@@ -16,6 +16,7 @@ namespace Orblit.Net;
 public sealed class SocketServer : IAsyncDisposable
 {
     private static readonly TimeSpan HeadTimeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan AcceptRetry = TimeSpan.FromMilliseconds(50);
 
     private readonly TcpListener _listener;
     private readonly IPAddress _address;
@@ -68,18 +69,26 @@ public sealed class SocketServer : IAsyncDisposable
 
     private async Task AcceptLoop()
     {
-        try
+        while (!_stop.IsCancellationRequested)
         {
-            while (true)
+            try
             {
                 _ = Serve(await _listener.AcceptTcpClientAsync(_stop.Token));
             }
-        }
-        catch (Exception error) when (_stop.IsCancellationRequested || error is SocketException or ObjectDisposedException)
-        {
-            // The listener was stopped. Accepting on a stopped listener throws InvalidOperationException
-            // even with a cancelled token, which a loop between two accepts meets, so a stop is
-            // judged by the token and not by the exception type.
+            catch (Exception error) when (_stop.IsCancellationRequested || error is ObjectDisposedException)
+            {
+                // The listener was stopped. Accepting on a stopped listener throws InvalidOperationException
+                // even with a cancelled token, which a loop between two accepts meets, so a stop is
+                // judged by the token and not by the exception type.
+                return;
+            }
+            catch (SocketException)
+            {
+                // A reset during accept, or no descriptors left. Dart keeps listening after an accept
+                // error, so one bad connection must not leave the server deaf. The pause spares a core
+                // when the cause lasts.
+                await Task.Delay(AcceptRetry, _stop.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
         }
     }
 

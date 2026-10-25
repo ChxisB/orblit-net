@@ -23,11 +23,9 @@ internal sealed class LoadRun : IAsyncDisposable
     private readonly List<Func<Task>> _closers = [];
     private readonly List<LoadPeer> _peers = [];
 
-    public LoadRun(LoadOptions options, SocketServer? server)
+    public LoadRun(LoadOptions options)
     {
         _options = options;
-        _server = server;
-        _listening = server?.Listen(transport => _accepted.Writer.TryWrite(transport));
         _clock = new TickClock(options.Period);
         _host = new NetHost(new NetHostOptions
         {
@@ -39,6 +37,10 @@ internal sealed class LoadRun : IAsyncDisposable
                 ? new GridInterest(_schema.Set, _schema.Position, new Grid(cell))
                 : null,
         });
+
+        // Bound last, so a constructor that throws does not leave a listener open.
+        _server = options.Sockets ? SocketServer.Bind() : null;
+        _listening = _server?.Listen(transport => _accepted.Writer.TryWrite(transport));
     }
 
     public async Task JoinAsync(int index, CancellationToken cancellationToken)
@@ -149,8 +151,7 @@ public static class LoadHarness
     public static async Task<LoadReport> RunAsync(LoadOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var server = options.Sockets ? SocketServer.Bind() : null;
-        await using var run = new LoadRun(options, server);
+        await using var run = new LoadRun(options);
         for (var i = 0; i < options.Clients; i++)
         {
             await run.JoinAsync(i, cancellationToken);

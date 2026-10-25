@@ -17,6 +17,7 @@ public sealed class LoopbackLink
     private readonly object _gate = new();
     private readonly Queue<Action> _queue = [];
     private readonly List<TaskCompletionSource> _idle = [];
+    private Task _lastDelayed = Task.CompletedTask;
     private int _pending;
     private bool _draining;
     private ExceptionDispatchInfo? _fault;
@@ -96,16 +97,23 @@ public sealed class LoopbackLink
         lock (_gate)
         {
             _pending++;
+            if (Latency != TimeSpan.Zero)
+            {
+                _lastDelayed = DelayThenEnqueue(_lastDelayed, work);
+                return;
+            }
         }
 
-        if (Latency == TimeSpan.Zero)
-        {
-            Enqueue(work);
-        }
-        else
-        {
-            _ = Task.Delay(Latency).ContinueWith(_ => Enqueue(work), TaskScheduler.Default);
-        }
+        Enqueue(work);
+    }
+
+    // Timers that fire together run their continuations in any order, so each message also waits
+    // for the one sent before it.
+    private async Task DelayThenEnqueue(Task before, Action work)
+    {
+        await Task.Delay(Latency);
+        await before;
+        Enqueue(work);
     }
 
     private void Enqueue(Action work)

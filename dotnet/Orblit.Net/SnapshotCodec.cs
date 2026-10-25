@@ -42,8 +42,10 @@ public static class SnapshotCodec
     private const int HeaderSize = 26;
     private const int GroupHeaderSize = 16;
 
+    private readonly record struct Header(byte Kind, long Tick, long BaselineTick);
+
     public static byte[] EncodeFull(WorldSnapshot snapshot) =>
-        Encode(snapshot.Tick, 0, isDelta: false, snapshot.Groups.Where(group => group.Length > 0).ToList(), []);
+        Encode(new Header(KindFull, snapshot.Tick, 0), snapshot.Groups.Where(group => group.Length > 0).ToList(), []);
 
     /// <summary>
     /// Encodes only what moved since <paramref name="baseline"/>. Most entities in most frames are
@@ -74,7 +76,7 @@ public static class SnapshotCodec
         }
 
         var despawned = baseline.NetworkIds.Where(id => current.RowFor(id) is null).ToArray();
-        return Encode(current.Tick, baseline.Tick, isDelta: true, builders.Values.Select(b => b.Build()).ToList(), despawned);
+        return Encode(new Header(KindDelta, current.Tick, baseline.Tick), builders.Values.Select(b => b.Build()).ToList(), despawned);
     }
 
     /// <summary>
@@ -187,7 +189,7 @@ public static class SnapshotCodec
         return despawned;
     }
 
-    private static byte[] Encode(long tick, long baselineTick, bool isDelta, List<SnapshotGroup> groups, ulong[] despawned)
+    private static byte[] Encode(Header header, List<SnapshotGroup> groups, ulong[] despawned)
     {
         var size = HeaderSize;
         foreach (var group in groups)
@@ -200,9 +202,9 @@ public static class SnapshotCodec
         var message = new byte[size];
         BinaryPrimitives.WriteUInt32LittleEndian(message, Magic);
         BinaryPrimitives.WriteUInt16LittleEndian(message.AsSpan(4), FormatVersion);
-        message[6] = isDelta ? KindDelta : KindFull;
-        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(8), unchecked((ulong)tick));
-        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(16), unchecked((ulong)baselineTick));
+        message[6] = header.Kind;
+        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(8), unchecked((ulong)header.Tick));
+        BinaryPrimitives.WriteUInt64LittleEndian(message.AsSpan(16), unchecked((ulong)header.BaselineTick));
         BinaryPrimitives.WriteUInt16LittleEndian(message.AsSpan(24), (ushort)groups.Count);
 
         var offset = HeaderSize;
