@@ -1,0 +1,24 @@
+<Project>
+  <!-- net10.0 compiles as C# 14, which meets the standard's C# 12 floor. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- The engine packages come from a folder, packed by the engine's tool/pack_local.sh. -->
+  <PropertyGroup>
+    <OrblitFeed>$(ORBLIT_FEED)</OrblitFeed>
+    <OrblitFeed Condition="'$(OrblitFeed)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.UserProfile))/.orblit/feed</OrblitFeed>
+    <RestoreAdditionalProjectSources>$(OrblitFeed)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+  <!-- CA1502 reads its threshold from this file. -->
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)CodeMetricsConfig.txt" Link="CodeMetricsConfig.txt" />
+  </ItemGroup>
+</Project>
