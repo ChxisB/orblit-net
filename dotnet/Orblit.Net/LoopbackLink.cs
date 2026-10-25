@@ -38,6 +38,18 @@ public sealed class LoopbackLink
 
     public TimeSpan Latency { get; }
 
+    /// <summary>Whether nothing is waiting to be delivered.</summary>
+    internal bool IsIdle
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _pending == 0;
+            }
+        }
+    }
+
     public ITransport Host { get; }
 
     public ITransport Client { get; }
