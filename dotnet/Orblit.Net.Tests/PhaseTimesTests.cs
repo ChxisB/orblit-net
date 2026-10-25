@@ -30,6 +30,28 @@ public sealed class PhaseTimesTests
     }
 
     [Fact]
+    public void TheNinetyFifthPercentileIsTheNearestRankNotTheMax()
+    {
+        var now = TimeSpan.Zero;
+        var times = new PhaseTimes(new TickClock(Period, () => now));
+        for (var length = 1; length <= 20; length++)
+        {
+            times.Phase("work", () => now += Ms(length));
+            times.Finish();
+        }
+
+        var summary = times.Summary(last: 20);
+        Assert.Equal(Ms(19), summary.TickP95);
+        Assert.Equal(Ms(20), summary.TickMax);
+    }
+
+    [Fact]
+    public void AnEmptyWindowHasNoPercentile()
+    {
+        Assert.Equal(TimeSpan.Zero, _times.Summary().TickP95);
+    }
+
+    [Fact]
     public void SummarisesTickLengthAndEachPhase()
     {
         Tick(("capture", 2), ("encode", 4));

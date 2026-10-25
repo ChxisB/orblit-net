@@ -23,6 +23,9 @@ public sealed record PhaseSummary
 
     public required TimeSpan TickMax { get; init; }
 
+    /// <summary>The tick length that 95 of every 100 ticks stayed within. The average hides the stalls that drop frames.</summary>
+    public required TimeSpan TickP95 { get; init; }
+
     public required TimeSpan DriftAverage { get; init; }
 
     public required TimeSpan DriftMax { get; init; }
@@ -199,6 +202,7 @@ public sealed class PhaseTimes
             Ticks = count,
             TickAverage = count == 0 ? TimeSpan.Zero : lengthSum / count,
             TickMax = lengthMax,
+            TickP95 = NearestRank95(window),
             DriftAverage = drifted == 0 ? TimeSpan.Zero : driftSum / drifted,
             DriftMax = driftMax,
             Phases = totals.ToDictionary(
@@ -208,6 +212,18 @@ public sealed class PhaseTimes
                 entry => entry.Key,
                 entry => new ClientBytes(new Dictionary<string, int>(entry.Value.Columns), entry.Value.Overhead)),
         };
+    }
+
+    // Nearest rank: the smallest length that at least 95 percent of the ticks are at or under.
+    private static TimeSpan NearestRank95(List<TickRecord> window)
+    {
+        if (window.Count == 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        var lengths = window.Select(tick => tick.Length).Order().ToList();
+        return lengths[((lengths.Count * 95 + 99) / 100) - 1];
     }
 
     private sealed class Sent
