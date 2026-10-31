@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>orblit-load</ToolCommandName>
+    <Version>0.1.0</Version>
+    <Description>Runs scripted clients against a host and judges its tick time, from a shell.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Orblit.Net\Orblit.Net.csproj" />
+  </ItemGroup>
+</Project>

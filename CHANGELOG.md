@@ -30,6 +30,8 @@
   - The load harness adds a `machine` line and a p95 tick time to its
     report. The `random` script uses `System.Random`, so its inputs are not
     Dart's. `--seconds` times `--hz` over `int.MaxValue` is refused.
+- Add `Orblit.Load` 0.1.0, a dotnet tool that runs the load harness as
+  `orblit-load`, with the options Dart's `bin/load.dart` takes.
 
 ## 0.9.0
 
