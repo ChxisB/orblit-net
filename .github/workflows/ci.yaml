@@ -25,12 +25,13 @@ jobs:
 
       - id: engine
         shell: bash
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          branch="${{ github.head_ref || github.ref_name }}"
           if git ls-remote --exit-code --heads \
-              https://github.com/ChxisB/orblit.git "$branch" > /dev/null; then
-            echo "Building against ChxisB/orblit@$branch"
-            echo "ref=$branch" >> "$GITHUB_OUTPUT"
+              https://github.com/ChxisB/orblit.git "$BRANCH" > /dev/null; then
+            echo "Building against ChxisB/orblit@$BRANCH"
+            echo "ref=$BRANCH" >> "$GITHUB_OUTPUT"
           else
             echo "No matching engine branch; using its default"
             echo "ref=" >> "$GITHUB_OUTPUT"
