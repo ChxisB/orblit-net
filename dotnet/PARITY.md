@@ -1,5 +1,9 @@
 # Parity
 
+The port is finished. The Dart is no longer in this repository. The last
+commit that has it is tagged `dart-final`, and the Dart test counts below were
+taken at that tag.
+
 One row per package that has been ported. A row is added when a part is built.
 
 Declared counts the test declarations in the source. Run counts the tests that
