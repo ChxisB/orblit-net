@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>0.10.0</Version>
+    <Description>Multiplayer for Orblit. Replication reads component columns rather than walking entities, and a transport is a small interface.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Orblit.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orblit.Net.Tests" />
+  </ItemGroup>
+</Project>

@@ -2,17 +2,27 @@
 
 ## 0.10.0
 
-- Add a browser `SocketTransport`. `SocketTransport.connect` works in a
-  browser, over its own WebSocket. A conditional export picks the browser
-  version or the `dart:io` one. `SocketServer` is not exported to the web,
-  so code that names it does not compile there.
-- Add `package:orblit_net/transport.dart`, the part of the package a
-  browser can compile: `Transport`, `LoopbackLink`, `SocketTransport` and,
-  off the web, `SocketServer`. `orblit_net.dart` exports the same names.
-- The `dart:io` transport moved to `socket_transport_io.dart` and the server
-  to `socket_server.dart`. The public names are the same.
-- The main library still needs the engine's native core, which has no web
-  build. A browser can use the transport but not a `NetClient` yet.
+- Move to C#. `Orblit.Net` 0.10.0 in `dotnet/` keeps the Dart package's wire
+  format. The Dart package is deleted, and so is its browser transport
+  (decision 71). The tag `dart-final` holds the last Dart commit.
+- Drop the two tests that joined a live Dart peer to a C# one, over a socket,
+  because they need the Dart package. At `dart-final` they ran and passed.
+- These differ from the Dart package:
+  - Messages reach a handler on a pool thread, one at a time per link.
+    Dart used its one event loop.
+  - `LoopbackLink` has `IdleAsync`, which waits for queued messages. A
+    handler that throws comes out of the next `IdleAsync`.
+  - `SnapshotFormatError` is `SnapshotFormatException`.
+  - `SocketTransport` starts reading at the first `Listen`. A message over
+    16 MiB ends the link. A listener that throws goes to `onError` and
+    ends the link.
+  - A cell gap of `long.MinValue` is far in `GridInterest`. Dart's `abs`
+    left it negative, so it counted as near.
+  - The load harness adds a `machine` line and a p95 tick time to its
+    report. The `random` script uses `System.Random`, so its inputs are not
+    Dart's. `--seconds` times `--hz` over `int.MaxValue` is refused.
+- Add `Orblit.Load` 0.1.0, a dotnet tool that runs the load harness as
+  `orblit-load`, with the options Dart's `bin/load.dart` took.
 
 ## 0.9.0
 
