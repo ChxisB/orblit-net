@@ -9,11 +9,12 @@ is the engine's storage decision paying for itself a second time.
 
 ```sh
 git clone https://github.com/ChxisB/orblit.git       # beside this one
+orblit/tool/build_native.sh                            # the engine's native core
 orblit/tool/pack_local.sh                              # packs the engine into ~/.orblit/feed
 ./tool/check_dotnet.sh
 ```
 
-It needs the .NET 10 SDK. `ORBLIT_FEED` names another feed folder.
+It needs the .NET 10 SDK and CMake. `ORBLIT_FEED` names another feed folder.
 
 ## What it does
 

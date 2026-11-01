@@ -13,12 +13,13 @@ the longer version of this.
 
 ```sh
 git clone https://github.com/ChxisB/orblit.git   # beside this one
+orblit/tool/build_native.sh                        # the engine's native core
 orblit/tool/pack_local.sh                          # packs the engine into ~/.orblit/feed
 ./tool/check_dotnet.sh
 ```
 
 `check_dotnet.sh` builds, tests and checks the format. It needs the .NET 10
-SDK. `ORBLIT_FEED` names another feed folder.
+SDK and CMake. `ORBLIT_FEED` names another feed folder.
 
 ## Licence
 
