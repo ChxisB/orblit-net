@@ -1,0 +1,2 @@
+# The .NET gates compare bytes, and Windows checks out CRLF by default.
+dotnet/** text eol=lf
