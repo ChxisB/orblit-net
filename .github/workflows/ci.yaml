@@ -50,6 +50,13 @@ jobs:
 
       # The runner context exists in a step and not in a job's env, so the
       # feed folder is named on each step that reads it.
+      # The packages carry the native core only if it is built before they are
+      # packed.
+      - name: Build the engine natives
+        shell: bash
+        working-directory: orblit
+        run: tool/build_native.sh
+
       - name: Pack the engine
         shell: bash
         working-directory: orblit
