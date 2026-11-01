@@ -38,7 +38,7 @@ public sealed class LoadCliTests : IDisposable
     {
         var code = await Run("--clients", "4", "--seconds", "1", "--hz", "10");
 
-        var lines = _output.ToString().Split('\n');
+        var lines = _output.ToString().ReplaceLineEndings("\n").Split('\n');
         Assert.Equal(0, code);
         Assert.Equal("script walk over loopback", lines[0]);
         Assert.StartsWith("4 clients, 10 ticks", lines[1], StringComparison.Ordinal);
