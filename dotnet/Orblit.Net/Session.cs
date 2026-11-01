@@ -44,7 +44,7 @@ public enum GoneReason
 
 /// <summary>
 /// The reasons a host puts in a goodbye. A game's own refusals may say anything else. The words are
-/// on the wire, so they match the Dart build.
+/// on the wire, so changing one breaks clients that match on the old word.
 /// </summary>
 public static class GoodbyeReason
 {

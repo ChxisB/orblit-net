@@ -29,8 +29,8 @@ public sealed class LoadTests
     {
         var report = await Run(Basic());
 
-        // Dart delivers the last tick's inputs after the report is built. Here a pool thread may
-        // deliver them first, so the count is either side of that line.
+        // A pool thread may deliver the last tick's inputs before or after the report is built, so
+        // the count is either side of that line.
         Assert.InRange(report.Accepted, 8 * 9, 8 * 10);
         Assert.Equal(0, report.Rejected);
     }

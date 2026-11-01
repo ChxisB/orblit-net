@@ -6,37 +6,63 @@ on:
   pull_request:
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
+  # The engine packages are packed from the engine checkout beside this one.
+  # The engine branch with this branch's name is the pair when there is one,
+  # so a change here and the engine change it needs build together. Without
+  # one it uses the engine's default branch.
+  dotnet:
+    name: .NET (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
           path: orblit-net
 
-      # The engine is a separate private repository, so CI checks it out and
-      # points this package at it rather than resolving a git dependency it
-      # has no credentials for. This step is the visible cost of the split;
-      # a monorepo would not need it.
+      - id: engine
+        shell: bash
+        run: |
+          branch="${{ github.head_ref || github.ref_name }}"
+          if git ls-remote --exit-code --heads \
+              https://github.com/ChxisB/orblit.git "$branch" > /dev/null; then
+            echo "Building against ChxisB/orblit@$branch"
+            echo "ref=$branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "No matching engine branch; using its default"
+            echo "ref=" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
         with:
-          # No token: these repositories are public, so the default
-          # GITHUB_TOKEN reads them. Nothing here needs a secret.
+          # No token: the engine is public, and the default GITHUB_TOKEN
+          # reads it.
           repository: ChxisB/orblit
+          ref: ${{ steps.engine.outputs.ref }}
           path: orblit
 
-      - uses: dart-lang/setup-dart@v1
+      - uses: actions/setup-dotnet@v4
         with:
-          # Pinned: a formatter that moves under the repository turns an
-          # unrelated SDK release into a red build.
-          sdk: 3.13.0
+          global-json-file: orblit-net/dotnet/global.json
 
-      - name: Link the engine
-        working-directory: orblit-net
-        run: ./tool/link_local.sh ../orblit
+      # The runner context exists in a step and not in a job's env, so the
+      # feed folder is named on each step that reads it.
+      - name: Pack the engine
+        shell: bash
+        working-directory: orblit
+        env:
+          ORBLIT_FEED: ${{ runner.temp }}/feed
+        run: tool/pack_local.sh
 
       - name: Check
+        shell: bash
         working-directory: orblit-net
-        run: ./tool/check.sh
+        env:
+          ORBLIT_FEED: ${{ runner.temp }}/feed
+        run: tool/check_dotnet.sh
 
   # Checks each commit on a pull request against commitlint.config.mjs.
   # Pull requests only, since a push to main has no range to check. It

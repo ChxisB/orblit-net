@@ -64,7 +64,7 @@ public sealed class LoopbackLink
 
     /// <summary>
     /// Completes once everything sent so far, and everything that sending caused, has been
-    /// delivered. Tests await it where a Dart test would let the event loop turn.
+    /// delivered. Tests await it, because a handler runs on a pool thread.
     /// </summary>
     public async Task IdleAsync()
     {

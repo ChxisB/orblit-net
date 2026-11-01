@@ -84,9 +84,8 @@ public sealed class SocketServer : IAsyncDisposable
             }
             catch (SocketException)
             {
-                // A reset during accept, or no descriptors left. Dart keeps listening after an accept
-                // error, so one bad connection must not leave the server deaf. The pause spares a core
-                // when the cause lasts.
+                // A reset during accept, or no descriptors left. One bad connection must not leave the
+                // server deaf. The pause spares a core when the cause lasts.
                 await Task.Delay(AcceptRetry, _stop.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             }
         }
