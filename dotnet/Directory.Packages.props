@@ -7,5 +7,7 @@
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
     <PackageVersion Include="Orblit.Core" Version="0.1.0" />
+    <PackageVersion Include="Orblit.Game" Version="0.2.0" />
+    <PackageVersion Include="Orblit.Scene" Version="0.28.0" />
   </ItemGroup>
 </Project>

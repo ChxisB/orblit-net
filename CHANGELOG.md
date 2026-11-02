@@ -1,5 +1,12 @@
 # Changelog
 
+## Orblit.Net.Game 0.1.0
+
+- Add `Orblit.Net.Game`, which carries the entities of a game scene over
+  `Orblit.Net`. The tagged ones, those with a `net` component, are spawned,
+  moved and removed on each client. Its own changelog is in
+  `dotnet/Orblit.Net.Game/CHANGELOG.md`. `Orblit.Net` is unchanged.
+
 ## 0.10.0
 
 - Move to C#. `Orblit.Net` 0.10.0 in `dotnet/` keeps the Dart package's wire
