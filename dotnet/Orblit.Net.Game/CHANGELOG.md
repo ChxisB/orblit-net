@@ -57,3 +57,7 @@
   counted in `UnhandledCalls`.
 - An offline game runs its own calls at once, `CallClient` and `CallAll`
   included, against the one set of handlers it holds.
+- `INetGame` is the interface a game implements to name its variables. The
+  editor reads `NetVars` before it builds the server and each client, so
+  every end is made from one schema. A game with none runs with no
+  variables.

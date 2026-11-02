@@ -11,6 +11,8 @@
 - Add calls to `Orblit.Net.Game`. A game runs a handler on the server or
   on a client by name, with `Call`, `CallClient` and `CallAll`, or marks
   methods `[ServerRpc]` and `[ClientRpc]` and binds them with `Bind`.
+- Add `INetGame`, which a game implements to name its variables. The
+  editor builds the server and each client of a Play session from it.
 
 ## 0.10.0
 
