@@ -7,28 +7,34 @@ using JsonMap = System.Collections.Generic.IReadOnlyDictionary<string, object?>;
 
 namespace Orblit.Net.Game;
 
-/// <summary>What the server tells a client about the entities it shares, apart from where they are.</summary>
-internal abstract record WireMessage(ulong NetworkId);
+/// <summary>What one end sends the other over the game-message channel, apart from where entities are.</summary>
+internal abstract record WireMessage;
 
 /// <summary>An entity now exists. It carries the entity whole, so a client that does not have it can make it.</summary>
-internal sealed record SpawnMessage(ulong NetworkId, SceneEntity Entity) : WireMessage(NetworkId);
+internal sealed record SpawnMessage(ulong NetworkId, SceneEntity Entity) : WireMessage;
 
 /// <summary>An entity has a new owner, or none.</summary>
-internal sealed record OwnerMessage(ulong NetworkId, string? ClientId) : WireMessage(NetworkId);
+internal sealed record OwnerMessage(ulong NetworkId, string? ClientId) : WireMessage;
+
+/// <summary>One end asks the other to run the handler it holds under <paramref name="Name"/>.</summary>
+internal sealed record CallMessage(string Name, object[] Args) : WireMessage;
 
 /// <summary>
-/// The bodies sent over the host's game-message channel. The first byte says what the body is, then
-/// comes the network id, then the rest of the body.
+/// The bodies sent over the host's game-message channel. The first byte says what the body is. A
+/// spawn or an owner message goes on with the network id and then the rest of the body. A call goes
+/// on with what <see cref="NetCodec"/> writes.
 /// </summary>
 /// <remarks>
 /// Where an entity is travels as a component column, with deltas and interpolation. These messages
 /// are for what happens once: an entity appears, an entity changes hands. They are reliable and
-/// ordered, so a client sees a spawn before the column that moves it. Tag 3 is kept for calls.
+/// ordered, so a client sees a spawn before the column that moves it. A call travels the same way, in
+/// either direction.
 /// </remarks>
 internal static class NetWire
 {
     private const byte SpawnTag = 1;
     private const byte OwnerTag = 2;
+    private const byte CallTag = 3;
     private const int HeaderLength = 1 + sizeof(ulong);
 
     public static byte[] Spawn(ulong networkId, SceneEntity entity) =>
@@ -36,8 +42,20 @@ internal static class NetWire
 
     public static byte[] Owner(ulong networkId, string? clientId) => Body(OwnerTag, networkId, clientId ?? string.Empty);
 
-    /// <summary>Reads a body, or returns null for one that is short, unknown or does not hold an entity.</summary>
+    public static byte[] Call(string name, IReadOnlyList<object> args) => [CallTag, .. NetCodec.EncodeCall(name, args)];
+
+    /// <summary>Reads a body, or returns null for one that is short, unknown or does not hold what its tag says.</summary>
     public static WireMessage? Read(byte[] body)
+    {
+        if (body.Length == 0)
+        {
+            return null;
+        }
+
+        return body[0] == CallTag ? NetCodec.DecodeCall(body.AsSpan(1)) : ReadEntityMessage(body);
+    }
+
+    private static WireMessage? ReadEntityMessage(byte[] body)
     {
         if (body.Length < HeaderLength)
         {

@@ -24,18 +24,23 @@ namespace Orblit.Net.Game;
 /// game's update, for each entity whose <c>sync</c> list names it.
 /// </para>
 /// <para>
+/// A call from a client is queued when it arrives and runs at the start of the next update, after the
+/// owners' moves are in the scene. See <see cref="NetCalls"/>.
+/// </para>
+/// <para>
 /// What is shared is read from the scene when its document changes, and not on every frame. The
 /// <c>net</c> component is read when the entity first appears. Changing it on a live entity does
 /// nothing until the entity is removed and added again.
 /// </para>
 /// </remarks>
-public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
+public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
 {
     private readonly World _world = new();
     private readonly NetLayout _layout;
     private readonly VarStore _vars;
     private readonly Dictionary<string, Shared> _shared = [];
     private readonly List<string> _clients = [];
+    private readonly CallRouter _router = new();
     private GameScene? _scene;
     private SceneDocument? _synced;
 
@@ -44,11 +49,26 @@ public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
     {
         _vars = new VarStore(vars ?? NetVarSchema.Empty);
         _layout = new NetLayout(_world, _vars.Schema);
-        Host = new NetHost(new NetHostOptions { World = _world, Set = _layout.Set, NetworkId = _layout.NetworkId });
+        Host = new NetHost(new NetHostOptions
+        {
+            World = _world,
+            Set = _layout.Set,
+            NetworkId = _layout.NetworkId,
+            OnMessage = Receive,
+        });
     }
 
     /// <summary>The host that sends the ticks. Its counts and its lock are for whoever runs the server.</summary>
     public NetHost Host { get; }
+
+    /// <summary>
+    /// How many client messages could not be used as a call: unreadable, naming an entity the scene
+    /// lacks, or not fitting the handler. They are dropped, and the game goes on.
+    /// </summary>
+    public int Malformed => _router.Malformed;
+
+    /// <summary>How many calls named a handler this server does not hold.</summary>
+    public int UnhandledCalls => _router.Unhandled;
 
     public GameRole Role => GameRole.Server;
 
@@ -57,6 +77,8 @@ public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
     VarStore IVarHost.Vars => _vars;
 
     SceneDocument IVarHost.Document => Scene.Document;
+
+    CallRouter ICallHost.Calls => _router;
 
     private GameScene Scene => _scene ?? throw new InvalidOperationException("Give this net to a GameHost before using it.");
 
@@ -118,6 +140,12 @@ public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
 
     bool IVarHost.MayWrite(string entityId) => true;
 
+    void ICallHost.Call(Outgoing call) => _router.Run(new NetCaller(null), call.Call, Scene.Document);
+
+    void ICallHost.CallClient(string clientId, Outgoing call) => Host.SendMessage(clientId, call.Body);
+
+    void ICallHost.CallAll(Outgoing call) => Broadcast(call.Body);
+
     public void BeforeUpdate()
     {
         TakeOwnerVars();
@@ -131,6 +159,7 @@ public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
         }
 
         Scene.Apply(new SceneDiff(moves));
+        _router.Dispatch(Scene.Document);
     }
 
     public void AfterUpdate()
@@ -144,6 +173,19 @@ public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
     {
         Host.Dispose();
         _world.Dispose();
+    }
+
+    // Runs on the transport's thread with the host's lock held. A client sends calls and nothing else.
+    private void Receive(string clientId, byte[] body)
+    {
+        if (NetWire.Read(body) is CallMessage call)
+        {
+            _router.Enqueue(new NetCaller(clientId), call);
+        }
+        else
+        {
+            _router.Reject();
+        }
     }
 
     private void SyncChanges()

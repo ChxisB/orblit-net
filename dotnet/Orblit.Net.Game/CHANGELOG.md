@@ -37,3 +37,23 @@
   from four arguments.
 - A game that declares different variables on the two ends is not
   detected. The wire carries no schema.
+- `net.Call(name, args)` runs the handler named `name` on the server.
+  `net.CallClient(clientId, name, args)` and `net.CallAll(name, args)` run
+  it on one client or on every client. `net.On(name, handler)` holds a
+  handler. A client cannot call a client.
+- An argument is a bool, an int, a float, a string, a `Vector3` or a
+  `NetEntity`, and a call takes at most 16. Any other type throws where the
+  call is made.
+- A call travels with the scene's messages, so the host's inbound budget
+  applies to it. It runs on the game's thread at the start of the next
+  update, in the order it was made.
+- `[ServerRpc]` and `[ClientRpc]` mark methods of the game. `net.Bind(game)`
+  holds one handler for each method of the role the net has, and checks
+  the signature of every marked method on every end. A bad one throws
+  `ArgumentException` naming the method.
+- A call that cannot be read, names an entity the scene lacks or does not fit
+  its method is dropped. `NetworkedServer.Malformed` and
+  `NetworkedClient.Malformed` count it. A call for a name nothing handles is
+  counted in `UnhandledCalls`.
+- An offline game runs its own calls at once, `CallClient` and `CallAll`
+  included, against the one set of handlers it holds.

@@ -26,14 +26,20 @@ namespace Orblit.Net.Game;
 /// A variable is shown the way the entity's place is. The owner of an entity with owner authority may
 /// set the variables in its <c>sync</c> list, and the server and the other clients read them.
 /// </para>
+/// <para>
+/// A call from the server is queued when it arrives and runs at the start of the next update, after
+/// the server's state is in the scene. See <see cref="NetCalls"/>.
+/// </para>
 /// </remarks>
-public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
+public sealed class NetworkedClient : IGameNet, IVarHost, ICallHost, IDisposable
 {
     private readonly World _world = new();
     private readonly NetLayout _layout;
     private readonly VarStore _vars;
     private readonly NetClient _client;
     private readonly string _clientId;
+    private const string OnlyTheServerCalls = "Only the server calls a client.";
+
     private readonly Dictionary<ulong, SceneEntity> _spawns = [];
     private readonly Dictionary<ulong, string> _owners = [];
     private readonly Dictionary<ulong, Shown> _shown = [];
@@ -42,8 +48,8 @@ public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
     private readonly Dictionary<ulong, Dictionary<string, byte[]>> _sentVars = [];
     private readonly List<ulong> _arrived = [];
     private readonly List<ulong> _departed = [];
+    private readonly CallRouter _router = new();
     private GameScene? _scene;
-    private int _malformed;
 
     public NetworkedClient(NetworkedClientOptions options)
     {
@@ -68,21 +74,20 @@ public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
 
     public string? LocalClient => _clientId;
 
-    /// <summary>How many server messages could not be read. They are dropped, and the game goes on.</summary>
-    public int Malformed
-    {
-        get
-        {
-            lock (_client.Gate)
-            {
-                return _malformed;
-            }
-        }
-    }
+    /// <summary>
+    /// How many server messages could not be used. They are unreadable, or a call naming an entity the
+    /// scene lacks, or a call that does not fit its handler. They are dropped, and the game goes on.
+    /// </summary>
+    public int Malformed => _router.Malformed;
+
+    /// <summary>How many calls named a handler this client does not hold.</summary>
+    public int UnhandledCalls => _router.Unhandled;
 
     VarStore IVarHost.Vars => _vars;
 
     SceneDocument IVarHost.Document => Scene.Document;
+
+    CallRouter ICallHost.Calls => _router;
 
     private GameScene Scene => _scene ?? throw new InvalidOperationException("Give this net to a GameHost before using it.");
 
@@ -98,12 +103,19 @@ public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
 
     bool IVarHost.MayWrite(string entityId) => OwnerOf(entityId) == _clientId;
 
+    void ICallHost.Call(Outgoing call) => _client.SendMessage(call.Body);
+
+    void ICallHost.CallClient(string clientId, Outgoing call) => throw new InvalidOperationException(OnlyTheServerCalls);
+
+    void ICallHost.CallAll(Outgoing call) => throw new InvalidOperationException(OnlyTheServerCalls);
+
     public void BeforeUpdate()
     {
         _client.Advance();
         Scene.Apply(TakeStructure());
         Scene.Apply(TakePlaces());
         TakeVars();
+        _router.Dispatch(Scene.Document);
     }
 
     public void AfterUpdate()
@@ -130,6 +142,9 @@ public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
     /// <summary>Like <see cref="Forge"/>, for a variable.</summary>
     internal void ForgeVar(string entityId, string name, byte[] bytes) => ForgeColumn(entityId, _layout.Columns[name], bytes);
 
+    /// <summary>Sends a body as a game message, whatever it holds. It exists so a test can play a client that sends rubbish.</summary>
+    internal void ForgeMessage(byte[] body) => _client.SendMessage(body);
+
     private void ForgeColumn(string entityId, ComponentType type, byte[] bytes)
     {
         ulong networkId;
@@ -155,8 +170,11 @@ public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
             case OwnerMessage owner:
                 Hand(owner);
                 break;
+            case CallMessage call:
+                _router.Enqueue(new NetCaller(null), call);
+                break;
             default:
-                _malformed++;
+                _router.Reject();
                 break;
         }
     }

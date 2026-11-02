@@ -8,6 +8,9 @@
   `dotnet/Orblit.Net.Game/CHANGELOG.md`. `Orblit.Net` is unchanged.
 - Add named variables to `Orblit.Net.Game`, typed by a schema both ends
   share. The server sets one, and an owner sets the ones on its entity.
+- Add calls to `Orblit.Net.Game`. A game runs a handler on the server or
+  on a client by name, with `Call`, `CallClient` and `CallAll`, or marks
+  methods `[ServerRpc]` and `[ClientRpc]` and binds them with `Bind`.
 
 ## 0.10.0
 
