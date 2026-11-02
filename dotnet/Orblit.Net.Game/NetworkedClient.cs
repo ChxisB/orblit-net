@@ -22,11 +22,16 @@ namespace Orblit.Net.Game;
 /// is the truth for it and the server's state is ignored. The server's state is a few frames old, and
 /// putting it back would drag the player behind their own input.
 /// </para>
+/// <para>
+/// A variable is shown the way the entity's place is. The owner of an entity with owner authority may
+/// set the variables in its <c>sync</c> list, and the server and the other clients read them.
+/// </para>
 /// </remarks>
-public sealed class NetworkedClient : IGameNet, IDisposable
+public sealed class NetworkedClient : IGameNet, IVarHost, IDisposable
 {
     private readonly World _world = new();
     private readonly NetLayout _layout;
+    private readonly VarStore _vars;
     private readonly NetClient _client;
     private readonly string _clientId;
     private readonly Dictionary<ulong, SceneEntity> _spawns = [];
@@ -34,27 +39,25 @@ public sealed class NetworkedClient : IGameNet, IDisposable
     private readonly Dictionary<ulong, Shown> _shown = [];
     private readonly Dictionary<string, ulong> _networkIds = [];
     private readonly Dictionary<ulong, float[]> _sent = [];
+    private readonly Dictionary<ulong, Dictionary<string, byte[]>> _sentVars = [];
     private readonly List<ulong> _arrived = [];
     private readonly List<ulong> _departed = [];
     private GameScene? _scene;
     private int _malformed;
 
-    /// <param name="clientId">The id the server knows this client by.</param>
-    /// <param name="transport">The link to the server.</param>
-    /// <param name="interpolationDelay">How far behind the server to show other entities. Zero shows each tick as it lands.</param>
-    /// <param name="clock">Time since the client started. Leave it out for a stopwatch.</param>
-    public NetworkedClient(string clientId, ITransport transport, TimeSpan interpolationDelay = default, Func<TimeSpan>? clock = null)
+    public NetworkedClient(NetworkedClientOptions options)
     {
-        _clientId = clientId;
-        _layout = new NetLayout(_world);
+        _clientId = options.ClientId;
+        _vars = new VarStore(options.Vars ?? NetVarSchema.Empty);
+        _layout = new NetLayout(_world, _vars.Schema);
         _client = new NetClient(new NetClientOptions
         {
             World = _world,
             Set = _layout.Set,
             NetworkId = _layout.NetworkId,
-            Transport = transport,
-            InterpolationDelay = interpolationDelay,
-            Clock = clock,
+            Transport = options.Transport,
+            InterpolationDelay = options.InterpolationDelay,
+            Clock = options.Clock,
             OnSpawn = (networkId, _) => _arrived.Add(networkId),
             OnDespawn = (networkId, _) => _departed.Add(networkId),
             OnMessage = Receive,
@@ -77,6 +80,10 @@ public sealed class NetworkedClient : IGameNet, IDisposable
         }
     }
 
+    VarStore IVarHost.Vars => _vars;
+
+    SceneDocument IVarHost.Document => Scene.Document;
+
     private GameScene Scene => _scene ?? throw new InvalidOperationException("Give this net to a GameHost before using it.");
 
     public string? OwnerOf(string entityId)
@@ -89,16 +96,19 @@ public sealed class NetworkedClient : IGameNet, IDisposable
 
     public void Attach(GameScene scene) => _scene = scene;
 
+    bool IVarHost.MayWrite(string entityId) => OwnerOf(entityId) == _clientId;
+
     public void BeforeUpdate()
     {
         _client.Advance();
         Scene.Apply(TakeStructure());
         Scene.Apply(TakePlaces());
+        TakeVars();
     }
 
     public void AfterUpdate()
     {
-        var writes = TakeOwnedMoves();
+        var writes = TakeOwnedChanges();
         if (writes.Count > 0)
         {
             _client.SendInput(writes);
@@ -115,7 +125,12 @@ public sealed class NetworkedClient : IGameNet, IDisposable
     /// Sends a write for an entity as if this client owned it, whatever the server thinks. It exists
     /// so a test can play a client that cheats.
     /// </summary>
-    internal void Forge(string entityId, float[] floats)
+    internal void Forge(string entityId, float[] floats) => ForgeColumn(entityId, _layout.Transform, NetLayout.Bytes(floats));
+
+    /// <summary>Like <see cref="Forge"/>, for a variable.</summary>
+    internal void ForgeVar(string entityId, string name, byte[] bytes) => ForgeColumn(entityId, _layout.Columns[name], bytes);
+
+    private void ForgeColumn(string entityId, ComponentType type, byte[] bytes)
     {
         ulong networkId;
         lock (_client.Gate)
@@ -125,7 +140,7 @@ public sealed class NetworkedClient : IGameNet, IDisposable
 
         _client.SendInput(new Dictionary<ulong, IReadOnlyDictionary<ComponentType, byte[]>>
         {
-            [networkId] = new Dictionary<ComponentType, byte[]> { [_layout.Transform] = NetLayout.Bytes(floats) },
+            [networkId] = new Dictionary<ComponentType, byte[]> { [type] = bytes },
         });
     }
 
@@ -150,6 +165,7 @@ public sealed class NetworkedClient : IGameNet, IDisposable
     private void Hand(OwnerMessage owner)
     {
         _sent.Remove(owner.NetworkId);
+        _sentVars.Remove(owner.NetworkId);
         if (owner.ClientId is { } clientId)
         {
             _owners[owner.NetworkId] = clientId;
@@ -189,12 +205,14 @@ public sealed class NetworkedClient : IGameNet, IDisposable
         _spawns.Remove(networkId);
         _owners.Remove(networkId);
         _sent.Remove(networkId);
+        _sentVars.Remove(networkId);
         if (!_shown.Remove(networkId, out var shown))
         {
             return [];
         }
 
         _networkIds.Remove(shown.EntityId);
+        _vars.Forget(shown.EntityId);
         return Scene.Document[shown.EntityId] is { } entity ? [new RemoveEntity(entity.ToJson())] : [];
     }
 
@@ -206,7 +224,11 @@ public sealed class NetworkedClient : IGameNet, IDisposable
         }
 
         var tag = entity[SceneComponents.Net] as NetComponent ?? new NetComponent();
-        _shown[networkId] = new Shown(entity.Id, tag.Authority, tag.Sync.Contains(NetComponent.TransformState));
+        _shown[networkId] = new Shown(
+            entity.Id,
+            tag.Authority,
+            tag.Sync.Contains(NetComponent.TransformState),
+            _vars.Schema.SharedBy(tag));
         _networkIds[entity.Id] = networkId;
         return Scene.Document.Contains(entity.Id) ? [] : [new AddEntity(entity.ToJson())];
     }
@@ -246,16 +268,44 @@ public sealed class NetworkedClient : IGameNet, IDisposable
         return _sent.TryAdd(networkId, floats) ? NetLayout.Placing(entity, floats) : null;
     }
 
-    private Dictionary<ulong, IReadOnlyDictionary<ComponentType, byte[]>> TakeOwnedMoves()
+    // Reads each variable the server sent into the game's cell. An owner is told once and then
+    // trusts its own cell, as it does for its place.
+    private void TakeVars()
+    {
+        lock (_client.Gate)
+        {
+            foreach (var (networkId, shown) in _shown)
+            {
+                if (_client.EntityFor(networkId) is { } ecs)
+                {
+                    TakeVarsOf(networkId, shown, ecs);
+                }
+            }
+        }
+    }
+
+    private void TakeVarsOf(ulong networkId, Shown shown, ulong ecs)
+    {
+        var mine = IsMine(networkId, shown);
+        foreach (var name in shown.Vars)
+        {
+            if (_layout.ReadVar(ecs, name) is { } bytes && (!mine || SentVarsOf(networkId).TryAdd(name, bytes)))
+            {
+                _vars.Write(shown.EntityId, name, bytes);
+            }
+        }
+    }
+
+    private Dictionary<ulong, IReadOnlyDictionary<ComponentType, byte[]>> TakeOwnedChanges()
     {
         var writes = new Dictionary<ulong, IReadOnlyDictionary<ComponentType, byte[]>>();
         lock (_client.Gate)
         {
             foreach (var (networkId, shown) in _shown)
             {
-                if (shown.SyncsTransform && IsMine(networkId, shown) && Moved(networkId, shown) is { } floats)
+                if (IsMine(networkId, shown) && ChangedColumns(networkId, shown) is { Count: > 0 } columns)
                 {
-                    writes[networkId] = new Dictionary<ComponentType, byte[]> { [_layout.Transform] = NetLayout.Bytes(floats) };
+                    writes[networkId] = columns;
                 }
             }
         }
@@ -263,7 +313,49 @@ public sealed class NetworkedClient : IGameNet, IDisposable
         return writes;
     }
 
-    private float[]? Moved(ulong networkId, Shown shown)
+    private Dictionary<ComponentType, byte[]> ChangedColumns(ulong networkId, Shown shown)
+    {
+        var columns = new Dictionary<ComponentType, byte[]>();
+        if (shown.SyncsTransform && TakeMove(networkId, shown) is { } floats)
+        {
+            columns[_layout.Transform] = NetLayout.Bytes(floats);
+        }
+
+        foreach (var name in shown.Vars)
+        {
+            if (TakeVarChange(networkId, shown.EntityId, name) is { } bytes)
+            {
+                columns[_layout.Columns[name]] = bytes;
+            }
+        }
+
+        return columns;
+    }
+
+    private byte[]? TakeVarChange(ulong networkId, string entityId, string name)
+    {
+        var sent = SentVarsOf(networkId);
+        if (!sent.TryGetValue(name, out var last) || _vars.Find(entityId, name) is not { } cell || cell.Bytes.AsSpan().SequenceEqual(last))
+        {
+            return null;
+        }
+
+        sent[name] = cell.Bytes;
+        return cell.Bytes;
+    }
+
+    private Dictionary<string, byte[]> SentVarsOf(ulong networkId)
+    {
+        if (!_sentVars.TryGetValue(networkId, out var sent))
+        {
+            sent = [];
+            _sentVars[networkId] = sent;
+        }
+
+        return sent;
+    }
+
+    private float[]? TakeMove(ulong networkId, Shown shown)
     {
         if (!_sent.TryGetValue(networkId, out var last) || Scene.Document[shown.EntityId] is not { } entity)
         {
@@ -283,5 +375,5 @@ public sealed class NetworkedClient : IGameNet, IDisposable
     private bool IsMine(ulong networkId, Shown shown) =>
         shown.Authority == NetAuthority.Owner && _owners.TryGetValue(networkId, out var owner) && owner == _clientId;
 
-    private sealed record Shown(string EntityId, NetAuthority Authority, bool SyncsTransform);
+    private sealed record Shown(string EntityId, NetAuthority Authority, bool SyncsTransform, string[] Vars);
 }

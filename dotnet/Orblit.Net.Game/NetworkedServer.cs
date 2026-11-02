@@ -17,7 +17,11 @@ namespace Orblit.Net.Game;
 /// <see cref="NetAuthority.Owner"/> is moved by its owner once <see cref="Assign"/> has named one, and
 /// by the game before that. A write from any other client is refused by the host and counted in
 /// <see cref="NetHost.Rejections"/>. While an owner holds an entity, a move by the server's game is
-/// undone by the owner's place at the start of the next update.
+/// undone by the owner's place at the start of the next update. The same goes for its variables.
+/// </para>
+/// <para>
+/// A variable the game sets through <see cref="NetVars.Var{T}"/> is written into its column after the
+/// game's update, for each entity whose <c>sync</c> list names it.
 /// </para>
 /// <para>
 /// What is shared is read from the scene when its document changes, and not on every frame. The
@@ -25,18 +29,21 @@ namespace Orblit.Net.Game;
 /// nothing until the entity is removed and added again.
 /// </para>
 /// </remarks>
-public sealed class NetworkedServer : IGameNet, IDisposable
+public sealed class NetworkedServer : IGameNet, IVarHost, IDisposable
 {
     private readonly World _world = new();
     private readonly NetLayout _layout;
+    private readonly VarStore _vars;
     private readonly Dictionary<string, Shared> _shared = [];
     private readonly List<string> _clients = [];
     private GameScene? _scene;
     private SceneDocument? _synced;
 
-    public NetworkedServer()
+    /// <param name="vars">The variables of the game. Every client is built from the same schema.</param>
+    public NetworkedServer(NetVarSchema? vars = null)
     {
-        _layout = new NetLayout(_world);
+        _vars = new VarStore(vars ?? NetVarSchema.Empty);
+        _layout = new NetLayout(_world, _vars.Schema);
         Host = new NetHost(new NetHostOptions { World = _world, Set = _layout.Set, NetworkId = _layout.NetworkId });
     }
 
@@ -46,6 +53,10 @@ public sealed class NetworkedServer : IGameNet, IDisposable
     public GameRole Role => GameRole.Server;
 
     public string? LocalClient => null;
+
+    VarStore IVarHost.Vars => _vars;
+
+    SceneDocument IVarHost.Document => Scene.Document;
 
     private GameScene Scene => _scene ?? throw new InvalidOperationException("Give this net to a GameHost before using it.");
 
@@ -105,8 +116,11 @@ public sealed class NetworkedServer : IGameNet, IDisposable
         Broadcast(NetWire.Owner(shared.NetworkId, clientId));
     }
 
+    bool IVarHost.MayWrite(string entityId) => true;
+
     public void BeforeUpdate()
     {
+        TakeOwnerVars();
         var moves = new List<SceneOp>();
         foreach (var (entityId, floats) in OwnerMoves())
         {
@@ -122,6 +136,7 @@ public sealed class NetworkedServer : IGameNet, IDisposable
     public void AfterUpdate()
     {
         SyncChanges();
+        WriteVars();
         Host.Publish();
     }
 
@@ -153,6 +168,7 @@ public sealed class NetworkedServer : IGameNet, IDisposable
         {
             Host.Despawn(_shared[gone].Entity);
             _shared.Remove(gone);
+            _vars.Forget(gone);
         }
 
         _synced = document;
@@ -179,7 +195,8 @@ public sealed class NetworkedServer : IGameNet, IDisposable
             var ecs = _world.CreateEntity();
             _world.Add(ecs, _layout.Transform);
             _layout.WriteColumn(ecs, NetLayout.PlaceOf(entity));
-            shared = new Shared(entity.Id, Host.Spawn(ecs), ecs, tag) { Seen = entity };
+            shared = new Shared(entity.Id, Host.Spawn(ecs), ecs, tag, _vars.Schema.SharedBy(tag)) { Seen = entity };
+            AddVars(shared);
         }
 
         _shared[entity.Id] = shared;
@@ -201,6 +218,53 @@ public sealed class NetworkedServer : IGameNet, IDisposable
 
     private bool IsOwned(Shared shared) => Host.OwnerOf(shared.NetworkId) is not null;
 
+    private bool IsHeld(Shared shared) => shared.Authority == NetAuthority.Owner && IsOwned(shared);
+
+    // Called with the host's lock held. The columns start at zero because WriteVars fills them
+    // before the first tick goes out.
+    private void AddVars(Shared shared)
+    {
+        foreach (var name in shared.Vars)
+        {
+            _layout.AddVar(shared.Entity, name);
+        }
+    }
+
+    // The owner's variables are the truth while it holds the entity, as its place is.
+    private void TakeOwnerVars()
+    {
+        lock (Host.Gate)
+        {
+            foreach (var shared in _shared.Values.Where(IsHeld))
+            {
+                foreach (var name in shared.Vars)
+                {
+                    if (_layout.ReadVar(shared.Entity, name) is { } bytes)
+                    {
+                        _vars.Write(shared.EntityId, name, bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    private void WriteVars()
+    {
+        lock (Host.Gate)
+        {
+            foreach (var shared in _shared.Values.Where(shared => !IsHeld(shared)))
+            {
+                foreach (var name in shared.Vars)
+                {
+                    if (_vars.Find(shared.EntityId, name) is { } cell)
+                    {
+                        _layout.WriteVar(shared.Entity, name, cell.Bytes);
+                    }
+                }
+            }
+        }
+    }
+
     private List<(string EntityId, float[] Floats)> OwnerMoves()
     {
         var moves = new List<(string, float[])>();
@@ -208,7 +272,7 @@ public sealed class NetworkedServer : IGameNet, IDisposable
         {
             foreach (var (entityId, shared) in _shared)
             {
-                if (shared.SyncsTransform && shared.Authority == NetAuthority.Owner && IsOwned(shared))
+                if (shared.SyncsTransform && IsHeld(shared))
                 {
                     moves.Add((entityId, _layout.ReadColumn(shared.Entity)));
                 }
@@ -240,7 +304,7 @@ public sealed class NetworkedServer : IGameNet, IDisposable
         }
     }
 
-    private sealed class Shared(string entityId, ulong networkId, ulong entity, NetComponent tag)
+    private sealed class Shared(string entityId, ulong networkId, ulong entity, NetComponent tag, string[] vars)
     {
         public string EntityId { get; } = entityId;
 
@@ -251,6 +315,9 @@ public sealed class NetworkedServer : IGameNet, IDisposable
         public NetAuthority Authority { get; } = tag.Authority;
 
         public bool SyncsTransform { get; } = tag.Sync.Contains(NetComponent.TransformState);
+
+        /// <summary>The declared variables this entity shares.</summary>
+        public string[] Vars { get; } = vars;
 
         /// <summary>The entity as last written, so an untouched one costs a reference check.</summary>
         public SceneEntity? Seen { get; set; }

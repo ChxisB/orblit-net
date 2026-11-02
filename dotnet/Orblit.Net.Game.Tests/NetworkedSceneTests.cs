@@ -1,6 +1,7 @@
 using Orblit.Game;
 using Orblit.Scene;
 using Orblit.VectorMath;
+using static Orblit.Net.Game.Tests.Scenes;
 
 namespace Orblit.Net.Game.Tests;
 
@@ -326,8 +327,6 @@ public sealed class NetworkedSceneTests
         Assert.Null(client.Fault);
     }
 
-    private static SceneDocument World(params SceneEntity[] entities) => new(entities: entities);
-
     private static double[] PositionOf(GameHost host, string id)
     {
         var position = ((TransformComponent)host.Scene[id]![SceneComponents.Transform]!).Position;
@@ -336,21 +335,6 @@ public sealed class NetworkedSceneTests
 
     private static float[] Place(float x, float y, float z) => [x, y, z, 0, 0, 0, 1, 1, 1];
 
-    private static SceneEntity Tagged(
-        string id,
-        double x,
-        double y,
-        double z,
-        NetAuthority authority = NetAuthority.Server,
-        string[]? sync = null) => new(
-        id,
-        id,
-        components: new Dictionary<string, SceneComponent>
-        {
-            [SceneComponents.Transform] = new TransformComponent(new Vector3(x, y, z)),
-            [SceneComponents.Net] = new NetComponent(authority, sync),
-        });
-
     private static SceneEntity Plain(string id, double x, double y, double z) => new(
         id,
         id,
@@ -358,8 +342,4 @@ public sealed class NetworkedSceneTests
         {
             [SceneComponents.Transform] = new TransformComponent(new Vector3(x, y, z)),
         });
-
-    private static SceneDiff Add(SceneEntity entity) => new([new AddEntity(entity.ToJson())]);
-
-    private static SceneDiff Remove(SceneDocument scene, string id) => new([new RemoveEntity(scene[id]!.ToJson())]);
 }

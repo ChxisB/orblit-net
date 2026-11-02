@@ -6,7 +6,8 @@ using Orblit.VectorMath;
 namespace Orblit.Net.Game;
 
 /// <summary>
-/// What a networked scene puts in a <see cref="World"/>: a network id and the entity's place.
+/// What a networked scene puts in a <see cref="World"/>: a network id, the entity's place and a column
+/// for each declared variable.
 /// </summary>
 /// <remarks>
 /// Both ends build it the same way. The replication set orders components by name, so the wire
@@ -16,23 +17,39 @@ namespace Orblit.Net.Game;
 /// the unit <see cref="TransformComponent"/> keeps. It is a float column because the host
 /// interpolates and delta-compresses those and leaves the rest alone.
 /// </para>
+/// <para>
+/// Every column is owner-writable. Who may write is decided by who owns the entity, and only an
+/// entity with owner authority can have an owner.
+/// </para>
 /// </remarks>
 internal sealed class NetLayout
 {
     private const int TransformLength = 9;
+    private const string TransformName = "orblit.net.transform";
+    private const string VarPrefix = "orblit.net.var.";
     private readonly World _world;
 
-    public NetLayout(World world)
+    public NetLayout(World world, NetVarSchema vars)
     {
         _world = world;
         NetworkId = world.RegisterComponent("orblit.net.id", ComponentKind.Int64);
-        Transform = world.RegisterComponent("orblit.net.transform", ComponentKind.Float32, TransformLength);
-        Set = new ReplicationSet([Transform], ["orblit.net.transform"]);
+        Transform = world.RegisterComponent(TransformName, ComponentKind.Float32, TransformLength);
+        Columns = vars.Declared.ToDictionary(
+            static pair => pair.Key,
+            pair => world.RegisterComponent(
+                VarPrefix + pair.Key,
+                NetVarCodec.ColumnKind(pair.Value),
+                NetVarCodec.Arity(pair.Value)));
+        var types = Columns.Values.Prepend(Transform).ToArray();
+        Set = new ReplicationSet(types, types.Select(static type => type.Name));
     }
 
     public ComponentType NetworkId { get; }
 
     public ComponentType Transform { get; }
+
+    /// <summary>The column of each declared variable, by the variable's name.</summary>
+    public IReadOnlyDictionary<string, ComponentType> Columns { get; }
 
     public ReplicationSet Set { get; }
 
@@ -83,4 +100,19 @@ internal sealed class NetLayout
             floats.CopyTo(values);
         }
     }
+
+    /// <summary>A variable's bytes, copied so they can be read after the world's lock is let go. Null when the entity has no such column.</summary>
+    public byte[]? ReadVar(ulong entity, string name) =>
+        _world.TryGetBytes(entity, Columns[name], out var bytes) ? bytes.ToArray() : null;
+
+    public void WriteVar(ulong entity, string name, byte[] bytes)
+    {
+        if (_world.TryGetBytes(entity, Columns[name], out var column))
+        {
+            bytes.CopyTo(column);
+        }
+    }
+
+    /// <summary>Gives an entity the column of a variable, at zero.</summary>
+    public void AddVar(ulong entity, string name) => _world.Add<byte>(entity, Columns[name], new byte[Columns[name].ByteSize]);
 }

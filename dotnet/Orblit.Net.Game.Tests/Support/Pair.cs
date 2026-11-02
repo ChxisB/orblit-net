@@ -16,12 +16,17 @@ internal sealed class Pair : IAsyncDisposable
     private readonly Dictionary<string, NetworkedClient> _clients = [];
     private readonly Dictionary<string, ScriptedGame> _games = [];
 
-    public Pair(SceneDocument scene, Func<TimeSpan>? clock = null, TimeSpan interpolationDelay = default)
+    public Pair(
+        SceneDocument scene,
+        Func<TimeSpan>? clock = null,
+        TimeSpan interpolationDelay = default,
+        NetVarSchema? vars = null)
     {
         Scene = scene;
         Clock = clock;
         InterpolationDelay = interpolationDelay;
-        Server = new NetworkedServer();
+        Vars = vars ?? NetVarSchema.Empty;
+        Server = new NetworkedServer(Vars);
         ServerGame = new ScriptedGame();
         ServerHost = new GameHost(ServerGame, scene, "/project", new SilentLog());
         ServerHost.UseNet(Server);
@@ -34,6 +39,8 @@ internal sealed class Pair : IAsyncDisposable
 
     public TimeSpan InterpolationDelay { get; }
 
+    public NetVarSchema Vars { get; }
+
     public NetworkedServer Server { get; }
 
     public ScriptedGame ServerGame { get; }
@@ -45,11 +52,18 @@ internal sealed class Pair : IAsyncDisposable
     public ScriptedGame ClientGame(string clientId) => _games[clientId];
 
     /// <summary>Connects a client that sees the scene the server started from, and returns its host.</summary>
-    public async Task<GameHost> Join(string clientId, SceneDocument? scene = null)
+    public async Task<GameHost> Join(string clientId, SceneDocument? scene = null, NetVarSchema? vars = null)
     {
         var link = new LoopbackLink();
         _links.Add(link);
-        var client = new NetworkedClient(clientId, link.Client, InterpolationDelay, Clock);
+        var client = new NetworkedClient(new NetworkedClientOptions
+        {
+            ClientId = clientId,
+            Transport = link.Client,
+            InterpolationDelay = InterpolationDelay,
+            Clock = Clock,
+            Vars = vars ?? Vars,
+        });
         var game = new ScriptedGame();
         _clients[clientId] = client;
         _games[clientId] = game;

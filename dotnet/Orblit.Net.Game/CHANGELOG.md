@@ -23,3 +23,17 @@
   rather than making a second one.
 - A server message a client cannot read is dropped and counted in
   `NetworkedClient.Malformed`.
+- `NetVarSchema` declares the variables of a game with a type for each:
+  bool, int, float or `Vector3`. Build the server and every client from
+  the same schema. At most 63 names, because the place takes one of the 64
+  columns a set holds.
+- `net.Var<T>(entityId, name)` returns a handle. The server sets it and a
+  client reads it, the way an entity's place is read. A name is shared by
+  an entity when its `net` component lists it in `sync`. The owner of an
+  entity with `owner` authority sets the variables it shares, and the
+  server and the other clients read them.
+- A handle on an offline net keeps its own value.
+- `NetworkedClient` is built from `NetworkedClientOptions` and no longer
+  from four arguments.
+- A game that declares different variables on the two ends is not
+  detected. The wire carries no schema.

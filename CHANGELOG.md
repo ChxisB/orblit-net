@@ -6,6 +6,8 @@
   `Orblit.Net`. The tagged ones, those with a `net` component, are spawned,
   moved and removed on each client. Its own changelog is in
   `dotnet/Orblit.Net.Game/CHANGELOG.md`. `Orblit.Net` is unchanged.
+- Add named variables to `Orblit.Net.Game`, typed by a schema both ends
+  share. The server sets one, and an owner sets the ones on its entity.
 
 ## 0.10.0
 
