@@ -38,7 +38,6 @@ public sealed class NetworkedClient : IGameNet, IVarHost, ICallHost, IDisposable
     private readonly VarStore _vars;
     private readonly NetClient _client;
     private readonly string _clientId;
-    private const string OnlyTheServerCalls = "Only the server calls a client.";
 
     private readonly Dictionary<ulong, SceneEntity> _spawns = [];
     private readonly Dictionary<ulong, string> _owners = [];
@@ -83,6 +82,12 @@ public sealed class NetworkedClient : IGameNet, IVarHost, ICallHost, IDisposable
     /// <summary>How many calls named a handler this client does not hold.</summary>
     public int UnhandledCalls => _router.Unhandled;
 
+    /// <summary>How many calls made a handler throw. The game went on.</summary>
+    public int FaultedCalls => _router.Faulted;
+
+    /// <summary>What the handler of the last faulted call threw, or null when none has.</summary>
+    public Exception? LastCallFault => _router.LastFault;
+
     VarStore IVarHost.Vars => _vars;
 
     SceneDocument IVarHost.Document => Scene.Document;
@@ -104,10 +109,6 @@ public sealed class NetworkedClient : IGameNet, IVarHost, ICallHost, IDisposable
     bool IVarHost.MayWrite(string entityId) => OwnerOf(entityId) == _clientId;
 
     void ICallHost.Call(Outgoing call) => _client.SendMessage(call.Body);
-
-    void ICallHost.CallClient(string clientId, Outgoing call) => throw new InvalidOperationException(OnlyTheServerCalls);
-
-    void ICallHost.CallAll(Outgoing call) => throw new InvalidOperationException(OnlyTheServerCalls);
 
     public void BeforeUpdate()
     {

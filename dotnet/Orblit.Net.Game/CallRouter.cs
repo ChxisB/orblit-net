@@ -17,6 +17,8 @@ internal sealed class CallRouter
     private readonly object _lock = new();
     private int _malformed;
     private int _unhandled;
+    private int _faulted;
+    private Exception? _lastFault;
 
     /// <summary>Calls that could not be read, or named an entity the scene lacks, or did not fit their handler.</summary>
     public int Malformed
@@ -38,6 +40,30 @@ internal sealed class CallRouter
             lock (_lock)
             {
                 return _unhandled;
+            }
+        }
+    }
+
+    /// <summary>Calls whose handler threw. The call is counted, the rest of the batch runs, and the game goes on.</summary>
+    public int Faulted
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _faulted;
+            }
+        }
+    }
+
+    /// <summary>What the handler of the last faulted call threw, or null when none has.</summary>
+    public Exception? LastFault
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _lastFault;
             }
         }
     }
@@ -64,17 +90,33 @@ internal sealed class CallRouter
         }
     }
 
-    /// <summary>Runs every queued call. Game thread.</summary>
+    /// <summary>
+    /// Runs every queued call, and each one even when another throws. A client chose the arguments, so a
+    /// handler that throws on them is counted and not allowed to end the game. Game thread.
+    /// </summary>
     /// <param name="document">The scene the entities in a call must be in, or null when there is none to check.</param>
     public void Dispatch(SceneDocument? document)
     {
         foreach (var (caller, call) in TakeInbound())
         {
-            Deliver(caller, call, document);
+            try
+            {
+                Deliver(caller, call, document);
+            }
+#pragma warning disable CA1031 // The arguments come from a peer. Whatever the game's handler throws on them is a fault to count, not a crash.
+            catch (Exception error)
+#pragma warning restore CA1031
+            {
+                lock (_lock)
+                {
+                    _faulted++;
+                    _lastFault = error;
+                }
+            }
         }
     }
 
-    /// <summary>Runs a call now, as it is delivered once it has been through the queue. Game thread.</summary>
+    /// <summary>Runs a call the game itself made, now. A throw from the handler reaches the caller. Game thread.</summary>
     public void Run(NetCaller caller, CallMessage call, SceneDocument? document) => Deliver(caller, call, document);
 
     private (NetCaller Caller, CallMessage Call)[] TakeInbound()

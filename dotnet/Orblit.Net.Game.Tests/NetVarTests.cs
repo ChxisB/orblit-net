@@ -361,7 +361,7 @@ public sealed class NetVarTests
     [Fact]
     public void AnOfflineNetKeepsTheValueInTheHandle()
     {
-        var score = OfflineNet.Instance.Var<int>("anything", "score");
+        var score = new OfflineNet().Var<int>("anything", "score");
 
         score.Value = 6;
 

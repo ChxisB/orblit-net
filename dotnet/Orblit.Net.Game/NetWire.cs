@@ -55,6 +55,13 @@ internal static class NetWire
         return body[0] == CallTag ? NetCodec.DecodeCall(body.AsSpan(1)) : ReadEntityMessage(body);
     }
 
+    /// <summary>
+    /// Reads a body as a call, or returns null for anything else. The server uses it because a client
+    /// sends calls and nothing more, so no other body is parsed.
+    /// </summary>
+    public static CallMessage? ReadCall(byte[] body) =>
+        body.Length > 0 && body[0] == CallTag ? NetCodec.DecodeCall(body.AsSpan(1)) : null;
+
     private static WireMessage? ReadEntityMessage(byte[] body)
     {
         if (body.Length < HeaderLength)

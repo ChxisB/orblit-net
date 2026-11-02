@@ -77,6 +77,9 @@ internal sealed class NetLayout
     public static float[] PlaceOf(SceneEntity entity) =>
         Floats(entity[SceneComponents.Transform] as TransformComponent ?? new TransformComponent());
 
+    /// <summary>Whether <paramref name="floats"/> is nine numbers a scene can hold, none of them infinite or not a number.</summary>
+    public static bool IsPlace(float[] floats) => floats.Length == TransformLength && floats.All(float.IsFinite);
+
     /// <summary>The edit that puts <paramref name="entity"/> at <paramref name="floats"/>, or null when it is already there.</summary>
     public static SetComponent? Placing(SceneEntity entity, float[] floats)
     {

@@ -9,7 +9,11 @@ public sealed class NetworkedClientOptions
     /// <summary>The link to the server.</summary>
     public required ITransport Transport { get; init; }
 
-    /// <summary>How far behind the server to show other entities. Zero shows each tick as it lands.</summary>
+    /// <summary>
+    /// How far behind the server to show other entities. Zero shows each tick as it lands. A delay blends
+    /// each value in a straight line, rotation included, so an angle that wraps from 359 to 1 swings back
+    /// through 180 for a moment.
+    /// </summary>
     public TimeSpan InterpolationDelay { get; init; }
 
     /// <summary>Time since the client started. Leave it out for a stopwatch.</summary>

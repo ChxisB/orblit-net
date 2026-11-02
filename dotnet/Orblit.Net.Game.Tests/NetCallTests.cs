@@ -332,7 +332,7 @@ public sealed class NetCallTests
     {
         await using var pair = new Pair(Crate());
         var client = await pair.Join("p1");
-        IGameNet[] nets = [pair.Server, pair.Client("p1"), OfflineNet.Instance];
+        IGameNet[] nets = [pair.Server, pair.Client("p1"), new OfflineNet()];
 
         foreach (var net in nets)
         {
@@ -356,14 +356,160 @@ public sealed class NetCallTests
     }
 
     [Fact]
+    public async Task AHandlerThatThrowsOnAClientsArgumentsDoesNotEndTheServerOrLoseTheRestOfTheBatch()
+    {
+        await using var pair = new Pair(Crate());
+        var client = await pair.Join("p1");
+        var seen = new List<int>();
+        pair.Server.On("shoot", (_, args) =>
+        {
+            var aim = (int)args[0];
+            seen.Add(aim >= 0 ? aim : throw new InvalidOperationException("bad aim"));
+        });
+
+        foreach (var aim in new[] { 1, -1, 2 })
+        {
+            pair.Client("p1").Call("shoot", aim);
+        }
+
+        await pair.Settle();
+        await pair.Step(client);
+
+        Assert.Equal([1, 2], seen);
+        Assert.True(pair.ServerHost.Running);
+        Assert.Null(pair.ServerHost.Fault);
+        Assert.Equal(1, pair.Server.FaultedCalls);
+        Assert.Equal("bad aim", pair.Server.LastCallFault?.Message);
+    }
+
+    [Fact]
+    public async Task AHandlerThatThrowsOnAClientDoesNotEndTheClientOrLoseTheRestOfTheBatch()
+    {
+        await using var pair = new Pair(Crate());
+        var client = await pair.Join("p1");
+        var seen = new List<string>();
+        pair.Client("p1").On("flash", (_, args) =>
+        {
+            var colour = (string)args[0];
+            seen.Add(colour != "bad" ? colour : throw new InvalidOperationException("bad colour"));
+        });
+
+        foreach (var colour in new[] { "red", "bad", "blue" })
+        {
+            pair.Server.CallClient("p1", "flash", colour);
+        }
+
+        await pair.Settle();
+        await pair.Step(client);
+
+        Assert.Equal(["red", "blue"], seen);
+        Assert.Null(client.Fault);
+        Assert.Equal(1, pair.Client("p1").FaultedCalls);
+        Assert.Equal("bad colour", pair.Client("p1").LastCallFault?.Message);
+    }
+
+    [Fact]
+    public async Task ACallToOneClientThatNamesAnEntityMadeThisUpdateWaitsForTheTickThatCarriesIt()
+    {
+        await using var pair = new Pair(Crate());
+        var client = await pair.Join("p1");
+        var seen = new List<string>();
+        pair.Client("p1").On("look", (_, args) => seen.Add(((NetEntity)args[0]).Id));
+
+        pair.Server.BeforeUpdate();
+        pair.ServerHost.ApplyEdit(Add(Tagged("late", 0, 0, 0)));
+        pair.Server.CallClient("p1", "look", new NetEntity("late"));
+        await InTheMiddleOfTheServersUpdate(pair, client);
+        pair.Server.AfterUpdate();
+        await pair.Settle();
+        client.Update(Pair.Idle, 0.016);
+
+        Assert.Equal(["late"], seen);
+        Assert.Equal(0, pair.Client("p1").Malformed);
+    }
+
+    [Fact]
+    public async Task ACallToAllThatNamesAnEntityMadeThisUpdateWaitsForTheTickThatCarriesIt()
+    {
+        await using var pair = new Pair(Crate());
+        var client = await pair.Join("p1");
+        var seen = new List<string>();
+        pair.Client("p1").On("look", (_, args) => seen.Add(((NetEntity)args[0]).Id));
+
+        pair.Server.BeforeUpdate();
+        pair.ServerHost.ApplyEdit(Add(Tagged("late", 0, 0, 0)));
+        pair.Server.CallAll("look", new NetEntity("late"));
+        await InTheMiddleOfTheServersUpdate(pair, client);
+        pair.Server.AfterUpdate();
+        await pair.Settle();
+        client.Update(Pair.Idle, 0.016);
+
+        Assert.Equal(["late"], seen);
+        Assert.Equal(0, pair.Client("p1").Malformed);
+    }
+
+    [Fact]
+    public async Task CallsToClientsGoOutInTheOrderTheyWereMadeAndAfterTheTick()
+    {
+        await using var pair = new Pair(Crate());
+        var client = await pair.Join("p1");
+        var seen = new List<int>();
+        pair.Client("p1").On("n", (_, args) => seen.Add((int)args[0]));
+
+        pair.ServerGame.Once(context =>
+        {
+            context.Net.CallAll("n", 1);
+            context.Net.CallClient("p1", "n", 2);
+            context.Net.CallAll("n", 3);
+        });
+        await pair.Step(client);
+
+        Assert.Equal([1, 2, 3], seen);
+    }
+
+    // A client frame that runs while the server is part way through its own, as a real client's does.
+    private static async Task InTheMiddleOfTheServersUpdate(Pair pair, GameHost client)
+    {
+        await pair.Settle();
+        client.Update(Pair.Idle, 0.016);
+        await pair.Settle();
+    }
+
+    [Fact]
+    public void OnlyACallBodyIsReadAsACall()
+    {
+        Assert.NotNull(NetWire.ReadCall(NetWire.Call("a", [1])));
+        Assert.Null(NetWire.ReadCall(NetWire.Spawn(1, Tagged("x", 0, 0, 0))));
+        Assert.Null(NetWire.ReadCall(NetWire.Owner(1, "p1")));
+        Assert.Null(NetWire.ReadCall([]));
+        Assert.Null(NetWire.ReadCall([3]));
+    }
+
+    [Fact]
+    public void TwoOfflineNetsHoldTheirOwnHandlers()
+    {
+        var first = new OfflineNet();
+        var second = new OfflineNet();
+        var seen = new List<string>();
+        first.On("ping", (_, _) => seen.Add("first"));
+        second.On("ping", (_, _) => seen.Add("second"));
+
+        second.Call("ping");
+        first.Call("ping");
+
+        Assert.Equal(["second", "first"], seen);
+    }
+
+    [Fact]
     public void AnOfflineGameRunsItsOwnCallsAtOnce()
     {
+        var net = new OfflineNet();
         var seen = new List<(string? From, int Number)>();
-        OfflineNet.Instance.On("offline.ping", (caller, args) => seen.Add((caller.ClientId, (int)args[0])));
+        net.On("offline.ping", (caller, args) => seen.Add((caller.ClientId, (int)args[0])));
 
-        OfflineNet.Instance.Call("offline.ping", 1);
-        OfflineNet.Instance.CallAll("offline.ping", 2);
-        OfflineNet.Instance.CallClient("p1", "offline.ping", 3);
+        net.Call("offline.ping", 1);
+        net.CallAll("offline.ping", 2);
+        net.CallClient("p1", "offline.ping", 3);
 
         Assert.Equal([(null, 1), (null, 2), (null, 3)], seen);
     }

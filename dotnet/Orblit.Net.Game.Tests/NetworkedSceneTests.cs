@@ -196,6 +196,57 @@ public sealed class NetworkedSceneTests
         Assert.Equal(1, pair.Server.Host.Rejections[InputRejection.NotOwned]);
     }
 
+    [Theory]
+    [InlineData(float.NaN)]
+    [InlineData(float.PositiveInfinity)]
+    [InlineData(float.NegativeInfinity)]
+    public async Task AnOwnerCannotPutItsEntityAtAPlaceThatIsNotAFiniteNumber(float bad)
+    {
+        await using var pair = new Pair(World(Tagged("hero", 1, 2, 3, NetAuthority.Owner)));
+        var owner = await pair.Join("p1");
+        var other = await pair.Join("p2");
+        pair.Server.Assign("hero", "p1");
+        await pair.Step(owner, other);
+
+        pair.Client("p1").Forge("hero", Place(bad, 0, 0));
+        await pair.Step(owner, other);
+        await pair.Step(owner, other);
+
+        Assert.Equal([1, 2, 3], PositionOf(pair.ServerHost, "hero"));
+        Assert.Equal([1, 2, 3], PositionOf(other, "hero"));
+        Assert.Null(pair.ServerHost.Fault);
+    }
+
+    [Fact]
+    public async Task AnOwnerCanStillMoveAfterItsEntityWasPutBackFromABadPlace()
+    {
+        await using var pair = new Pair(World(Tagged("hero", 1, 2, 3, NetAuthority.Owner)));
+        var owner = await pair.Join("p1");
+        pair.Server.Assign("hero", "p1");
+        await pair.Step(owner);
+        pair.Client("p1").Forge("hero", Place(float.NaN, 0, 0));
+        await pair.Step(owner);
+        pair.ClientGame("p1").Once(context =>
+            context.Scene.Apply(Pair.Moved(context.Scene.Document, "hero", new Vector3(4, 0, 0))));
+
+        await pair.Step(owner);
+        await pair.Step(owner);
+
+        Assert.Equal([4, 0, 0], PositionOf(pair.ServerHost, "hero"));
+    }
+
+    [Fact]
+    public async Task AnEntityCannotBeHandedToAClientTheServerDoesNotKnow()
+    {
+        await using var pair = new Pair(World(Tagged("hero", 0, 0, 0, NetAuthority.Owner)));
+        await pair.Join("p1");
+
+        Assert.Throws<ArgumentException>(() => pair.Server.Assign("hero", "ghost"));
+        pair.Server.RemoveClient("p1");
+        Assert.Throws<ArgumentException>(() => pair.Server.Assign("hero", "p1"));
+        Assert.Null(pair.Server.OwnerOf("hero"));
+    }
+
     [Fact]
     public async Task AnOwnerAuthorityEntityTheOwnerMovesShowsOnTheOtherClient()
     {

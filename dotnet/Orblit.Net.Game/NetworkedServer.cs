@@ -25,15 +25,21 @@ namespace Orblit.Net.Game;
 /// </para>
 /// <para>
 /// A call from a client is queued when it arrives and runs at the start of the next update, after the
-/// owners' moves are in the scene. See <see cref="NetCalls"/>.
+/// owners' moves are in the scene. A call to a client is held until the end of the update that made
+/// it, and goes out after the tick, in the order the calls were made. See <see cref="NetCalls"/>.
 /// </para>
 /// <para>
-/// What is shared is read from the scene when its document changes, and not on every frame. The
-/// <c>net</c> component is read when the entity first appears. Changing it on a live entity does
-/// nothing until the entity is removed and added again.
+/// What is shared is read from the scene once for each new document the game makes, and the read
+/// takes time in step with the number of entities. A game that changes the scene every frame reads it
+/// every frame. The <c>net</c> component is read when the entity first appears. Changing it on a live
+/// entity does nothing until the entity is removed and added again.
+/// </para>
+/// <para>
+/// <see cref="AddClient"/>, <see cref="RemoveClient"/> and <see cref="Assign"/> belong to the game's
+/// thread, like the calls a game makes. The host's own members are for the transport's thread.
 /// </para>
 /// </remarks>
-public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
+public sealed class NetworkedServer : IGameNet, IVarHost, IServerCalls, IDisposable
 {
     private readonly World _world = new();
     private readonly NetLayout _layout;
@@ -41,6 +47,7 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
     private readonly Dictionary<string, Shared> _shared = [];
     private readonly List<string> _clients = [];
     private readonly CallRouter _router = new();
+    private readonly List<(string? ClientId, byte[] Body)> _calls = [];
     private GameScene? _scene;
     private SceneDocument? _synced;
 
@@ -69,6 +76,12 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
 
     /// <summary>How many calls named a handler this server does not hold.</summary>
     public int UnhandledCalls => _router.Unhandled;
+
+    /// <summary>How many calls made a handler throw. The game went on.</summary>
+    public int FaultedCalls => _router.Faulted;
+
+    /// <summary>What the handler of the last faulted call threw, or null when none has.</summary>
+    public Exception? LastCallFault => _router.LastFault;
 
     public GameRole Role => GameRole.Server;
 
@@ -121,8 +134,14 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
     /// is null.
     /// </summary>
     /// <exception cref="InvalidOperationException">The entity is not shared, or the server holds its authority.</exception>
+    /// <exception cref="ArgumentException"><paramref name="clientId"/> is not a client of this server.</exception>
     public void Assign(string entityId, string? clientId)
     {
+        if (clientId is not null && !_clients.Contains(clientId))
+        {
+            throw new ArgumentException($"\"{clientId}\" is not a client of this server.", nameof(clientId));
+        }
+
         SyncChanges();
         if (!_shared.TryGetValue(entityId, out var shared))
         {
@@ -142,9 +161,11 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
 
     void ICallHost.Call(Outgoing call) => _router.Run(new NetCaller(null), call.Call, Scene.Document);
 
-    void ICallHost.CallClient(string clientId, Outgoing call) => Host.SendMessage(clientId, call.Body);
+    // A client makes an entity when a tick carries it. A call that names one the game made in this
+    // update would reach the client first and be dropped, so calls wait until the tick is out.
+    void IServerCalls.CallClient(string clientId, Outgoing call) => _calls.Add((clientId, call.Body));
 
-    void ICallHost.CallAll(Outgoing call) => Broadcast(call.Body);
+    void IServerCalls.CallAll(Outgoing call) => _calls.Add((null, call.Body));
 
     public void BeforeUpdate()
     {
@@ -167,6 +188,7 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
         SyncChanges();
         WriteVars();
         Host.Publish();
+        SendCalls();
     }
 
     public void Dispose()
@@ -178,7 +200,7 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
     // Runs on the transport's thread with the host's lock held. A client sends calls and nothing else.
     private void Receive(string clientId, byte[] body)
     {
-        if (NetWire.Read(body) is CallMessage call)
+        if (NetWire.ReadCall(body) is { } call)
         {
             _router.Enqueue(new NetCaller(clientId), call);
         }
@@ -314,14 +336,33 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
         {
             foreach (var (entityId, shared) in _shared)
             {
-                if (shared.SyncsTransform && IsHeld(shared))
+                if (shared.SyncsTransform && IsHeld(shared) && TakePlace(shared) is { } floats)
                 {
-                    moves.Add((entityId, _layout.ReadColumn(shared.Entity)));
+                    moves.Add((entityId, floats));
                 }
             }
         }
 
         return moves;
+    }
+
+    // Called with the host's lock held. The owner's client wrote the column, so its floats are not
+    // trusted. A place that is not a number would reach every other copy, so the scene's place goes
+    // back into the column and the move is dropped.
+    private float[]? TakePlace(Shared shared)
+    {
+        var floats = _layout.ReadColumn(shared.Entity);
+        if (NetLayout.IsPlace(floats))
+        {
+            return floats;
+        }
+
+        if (Scene.Document[shared.EntityId] is { } entity)
+        {
+            _layout.WriteColumn(shared.Entity, NetLayout.PlaceOf(entity));
+        }
+
+        return null;
     }
 
     private void Tell(string clientId, Shared shared)
@@ -336,6 +377,23 @@ public sealed class NetworkedServer : IGameNet, IVarHost, ICallHost, IDisposable
         {
             Host.SendMessage(clientId, NetWire.Owner(shared.NetworkId, owner));
         }
+    }
+
+    private void SendCalls()
+    {
+        foreach (var (clientId, body) in _calls)
+        {
+            if (clientId is null)
+            {
+                Broadcast(body);
+            }
+            else
+            {
+                Host.SendMessage(clientId, body);
+            }
+        }
+
+        _calls.Clear();
     }
 
     private void Broadcast(byte[] body)

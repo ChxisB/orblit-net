@@ -157,7 +157,7 @@ public sealed class NetRpcTests
         await using var pair = new Pair(Crate());
         await pair.Join("p1");
         var instance = Activator.CreateInstance(game)!;
-        IGameNet[] nets = [pair.Server, pair.Client("p1"), OfflineNet.Instance];
+        IGameNet[] nets = [pair.Server, pair.Client("p1"), new OfflineNet()];
 
         foreach (var net in nets)
         {
@@ -167,16 +167,17 @@ public sealed class NetRpcTests
     }
 
     [Fact]
-    public void BindingNoGameIsRefused() => Assert.Throws<ArgumentNullException>(() => OfflineNet.Instance.Bind(null!));
+    public void BindingNoGameIsRefused() => Assert.Throws<ArgumentNullException>(() => new OfflineNet().Bind(null!));
 
     [Fact]
     public void AnOfflineGameBindsBothRolesAndRunsThemAtOnce()
     {
         var game = new OfflineArena();
-        OfflineNet.Instance.Bind(game);
+        var net = new OfflineNet();
+        net.Bind(game);
 
-        OfflineNet.Instance.Call("OfflineHit", 2);
-        OfflineNet.Instance.Call("OfflineFlash", "blue");
+        net.Call("OfflineHit", 2);
+        net.Call("OfflineFlash", "blue");
 
         Assert.Equal([(null, 2)], game.Hits);
         Assert.Equal(["blue"], game.Flashes);
@@ -185,9 +186,10 @@ public sealed class NetRpcTests
     [Fact]
     public void AMethodThatThrowsThrowsItsOwnErrorNotTheReflectionWrapper()
     {
-        OfflineNet.Instance.Bind(new OfflineArena());
+        var net = new OfflineNet();
+        net.Bind(new OfflineArena());
 
-        var error = Assert.Throws<InvalidOperationException>(() => OfflineNet.Instance.Call("OfflineBoom"));
+        var error = Assert.Throws<InvalidOperationException>(() => net.Call("OfflineBoom"));
 
         Assert.Equal("boom", error.Message);
     }

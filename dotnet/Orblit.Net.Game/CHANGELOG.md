@@ -56,7 +56,18 @@
   `NetworkedClient.Malformed` count it. A call for a name nothing handles is
   counted in `UnhandledCalls`.
 - An offline game runs its own calls at once, `CallClient` and `CallAll`
-  included, against the one set of handlers it holds.
+  included, against the handlers held on its own net. Each game host makes
+  its own offline net, so two games share no handlers.
+- A call to a client goes out at the end of the update that made it, after
+  the tick, in the order the calls were made. A client makes an entity when
+  a tick carries it, so a call that names a new entity arrives after it.
+- A handler that throws on a call from the other end does not stop the game.
+  The call is counted in `FaultedCalls` and the exception is kept in
+  `LastCallFault`. A call the game makes to itself throws to its caller.
+- A move of an owned entity with a NaN or an infinity in it is dropped.
+  The scene keeps the last good place.
+- `NetworkedServer.Assign` throws `ArgumentException` for a client the
+  server does not know.
 - `INetGame` is the interface a game implements to name its variables. The
   editor reads `NetVars` before it builds the server and each client, so
   every end is made from one schema. A game with none runs with no

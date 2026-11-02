@@ -18,14 +18,18 @@ public readonly record struct NetCaller(string? ClientId);
 /// <summary>An entity named in a call. The receiving end drops the call when its scene has no such entity.</summary>
 public readonly record struct NetEntity(string Id);
 
-/// <summary>What the two ends of a networked game do with a call. A net that is not one of them runs it here.</summary>
+/// <summary>What either end of a networked game does with a call. A net that is not one of them runs it here.</summary>
 internal interface ICallHost
 {
     CallRouter Calls { get; }
 
     /// <summary>Runs the call on the server.</summary>
     void Call(Outgoing call);
+}
 
+/// <summary>What only the server can do: call the clients.</summary>
+internal interface IServerCalls : ICallHost
+{
     void CallClient(string clientId, Outgoing call);
 
     void CallAll(Outgoing call);
@@ -47,14 +51,21 @@ internal readonly record struct Outgoing(CallMessage Call, byte[] Body);
 /// <para>
 /// A game that runs offline is its own server and its own client. Its calls run at once, and
 /// <see cref="CallClient"/> and <see cref="CallAll"/> run the handler of the one copy there is.
-/// Offline handlers belong to the net, which lives as long as the process, so a game that binds itself
-/// again replaces them by name.
+/// Offline handlers belong to the net, and the game host makes one net for each game, so a game that
+/// binds itself again replaces its own handlers by name and no other game sees them.
+/// </para>
+/// <para>
+/// A handler that throws on a queued call does not stop the game. The call is counted in
+/// <c>FaultedCalls</c>, the rest of the batch runs, and the exception is kept in <c>LastCallFault</c>.
+/// A call the game makes to itself, on the server or offline, throws to its caller.
 /// </para>
 /// </remarks>
 public static class NetCalls
 {
     private const BindingFlags Methods =
         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static;
+
+    private const string OnlyTheServerCalls = "Only the server calls a client.";
 
     private static readonly ConditionalWeakTable<IGameNet, CallRouter> Offline = [];
 
@@ -68,21 +79,49 @@ public static class NetCalls
 
     /// <summary>Runs the handler named <paramref name="name"/> on the server. On the server it runs at once.</summary>
     /// <exception cref="ArgumentException">The name is empty, or an argument is of a type a call cannot carry.</exception>
-    public static void Call(this IGameNet net, string name, params object[] args) =>
-        Send(net, name, args, static (host, call) => host.Call(call));
+    public static void Call(this IGameNet net, string name, params object[] args)
+    {
+        var call = Made(net, name, args);
+        if (net is ICallHost host)
+        {
+            host.Call(call);
+        }
+        else
+        {
+            RunHere(net, call);
+        }
+    }
 
     /// <summary>Runs the handler named <paramref name="name"/> on one client.</summary>
     /// <exception cref="InvalidOperationException">Called on a client. Only the server calls a client.</exception>
     public static void CallClient(this IGameNet net, string clientId, string name, params object[] args)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
-        Send(net, name, args, (host, call) => host.CallClient(clientId, call));
+        var call = Made(net, name, args);
+        if (net is IServerCalls server)
+        {
+            server.CallClient(clientId, call);
+        }
+        else
+        {
+            RunBelow(net, call);
+        }
     }
 
     /// <summary>Runs the handler named <paramref name="name"/> on every client.</summary>
     /// <exception cref="InvalidOperationException">Called on a client. Only the server calls a client.</exception>
-    public static void CallAll(this IGameNet net, string name, params object[] args) =>
-        Send(net, name, args, static (host, call) => host.CallAll(call));
+    public static void CallAll(this IGameNet net, string name, params object[] args)
+    {
+        var call = Made(net, name, args);
+        if (net is IServerCalls server)
+        {
+            server.CallAll(call);
+        }
+        else
+        {
+            RunBelow(net, call);
+        }
+    }
 
     /// <summary>
     /// Holds a handler for each method of <paramref name="game"/> marked <see cref="ServerRpcAttribute"/>
@@ -118,19 +157,26 @@ public static class NetCalls
         }
     }
 
-    private static void Send(IGameNet net, string name, object[] args, Action<ICallHost, Outgoing> remote)
+    // Writing the bytes is what checks the name and the arguments, so every end refuses the same calls.
+    private static Outgoing Made(IGameNet net, string name, object[] args)
     {
         ArgumentNullException.ThrowIfNull(net);
         ArgumentNullException.ThrowIfNull(args);
-        var outgoing = new Outgoing(new CallMessage(name, [.. args]), NetWire.Call(name, args));
-        if (net is ICallHost host)
+        return new Outgoing(new CallMessage(name, [.. args]), NetWire.Call(name, args));
+    }
+
+    private static void RunHere(IGameNet net, Outgoing call) =>
+        RouterOf(net).Run(new NetCaller(null), call.Call, null);
+
+    // A client has no one below it to call. Any other net that is not a server is its own client.
+    private static void RunBelow(IGameNet net, Outgoing call)
+    {
+        if (net is ICallHost)
         {
-            remote(host, outgoing);
+            throw new InvalidOperationException(OnlyTheServerCalls);
         }
-        else
-        {
-            RouterOf(net).Run(new NetCaller(null), outgoing.Call, null);
-        }
+
+        RunHere(net, call);
     }
 
     private static CallRouter RouterOf(IGameNet net)
