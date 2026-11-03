@@ -1,5 +1,19 @@
 # Changelog
 
+## Orblit.Net.Game 0.1.0
+
+- Add `Orblit.Net.Game`, which carries the entities of a game scene over
+  `Orblit.Net`. The tagged ones, those with a `net` component, are spawned,
+  moved and removed on each client. Its own changelog is in
+  `dotnet/Orblit.Net.Game/CHANGELOG.md`. `Orblit.Net` is unchanged.
+- Add named variables to `Orblit.Net.Game`, typed by a schema both ends
+  share. The server sets one, and an owner sets the ones on its entity.
+- Add calls to `Orblit.Net.Game`. A game runs a handler on the server or
+  on a client by name, with `Call`, `CallClient` and `CallAll`, or marks
+  methods `[ServerRpc]` and `[ClientRpc]` and binds them with `Bind`.
+- Add `INetGame`, which a game implements to name its variables. The
+  editor builds the server and each client of a Play session from it.
+
 ## 0.10.0
 
 - Move to C#. `Orblit.Net` 0.10.0 in `dotnet/` keeps the Dart package's wire

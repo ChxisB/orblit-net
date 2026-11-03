@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <Description>Multiplayer for a game that runs in the Orblit host. An entity tagged with a net component is spawned, moved and removed on every client, over Orblit.Net.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Orblit.Net\Orblit.Net.csproj" />
+    <PackageReference Include="Orblit.Game" />
+    <PackageReference Include="Orblit.Scene" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orblit.Net.Game.Tests" />
+  </ItemGroup>
+</Project>
